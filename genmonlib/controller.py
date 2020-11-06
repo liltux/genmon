@@ -54,13 +54,13 @@ class GeneratorController(MySupport):
         self.NotChanged = 0         # stats for registers
         self.Changed = 0            # stats for registers
         self.TotalChanged = 0.0     # ratio of changed ragisters
-        self.MaintLog =  ConfigFilePath + "maintlog.json"
+        self.MaintLog =  os.path.join(ConfigFilePath, "maintlog.json")
         self.MaintLogList = []
         self.MaintLock = threading.RLock()
-        self.OutageLog = ConfigFilePath + "outage.txt"
+        self.OutageLog = os.path.join(ConfigFilePath, "outage.txt")
         self.MinimumOutageDuration = 0
         self.PowerLogMaxSize = 15.0       # 15 MB max size
-        self.PowerLog =  ConfigFilePath + "kwlog.txt"
+        self.PowerLog =  os.path.join(ConfigFilePath, "kwlog.txt")
         self.PowerLogList = []
         self.PowerLock = threading.RLock()
         self.KWHoursMonth = None
@@ -73,6 +73,7 @@ class GeneratorController(MySupport):
         self.ExternalDataLock = threading.RLock()
         self.ExternalTempData = None
         self.ExternalTempDataTime = None
+        self.debug = False
 
         self.UtilityVoltsMin = 0    # Minimum reported utility voltage above threshold
         self.UtilityVoltsMax = 0    # Maximum reported utility voltage above pickup
@@ -88,6 +89,8 @@ class GeneratorController(MySupport):
         self.EngineDisplacement = "Unknown"
         self.TankSize = 0
         self.UseExternalFuelData = False
+        self.UseExternalCTData = False
+        self.ExternalCTData = None
 
         self.ProgramStartTime = datetime.datetime.now()     # used for com metrics
         self.OutageStartTime = self.ProgramStartTime        # if these two are the same, no outage has occured
@@ -104,6 +107,7 @@ class GeneratorController(MySupport):
                 self.bDisablePowerLog = self.config.ReadValue('disablepowerlog', return_type = bool, default = False)
                 self.SubtractFuel = self.config.ReadValue('subtractfuel', return_type = float, default = 0.0)
                 self.UserURL = self.config.ReadValue('user_url',  default = "").strip()
+                self.UseExternalCTData = self.config.ReadValue('use_external_power_data', return_type = bool, default = False)
                 # for gentankutil
                 self.UseExternalFuelData = self.config.ReadValue('use_external_fuel_data', return_type = bool, default = False)
                 if not self.UseExternalFuelData:
@@ -127,10 +131,16 @@ class GeneratorController(MySupport):
 
                 if self.config.HasOption('nominalfrequency'):
                     self.NominalFreq = self.config.ReadValue('nominalfrequency')
+                    if not self.StringIsInt(self.NominalFreq):
+                        self.NominalFreq = "Unknown"
                 if self.config.HasOption('nominalRPM'):
                     self.NominalRPM = self.config.ReadValue('nominalRPM')
+                    if not self.StringIsInt(self.NominalRPM):
+                        self.NominalRPM = "Unknown"
                 if self.config.HasOption('nominalKW'):
                     self.NominalKW = self.config.ReadValue('nominalKW')
+                    if not self.StringIsInt(self.NominalKW):
+                        self.NominalKW = "Unknown"
                 if self.config.HasOption('model'):
                     self.Model = self.config.ReadValue('model')
 
@@ -175,7 +185,8 @@ class GeneratorController(MySupport):
                 try:
                     if not self.InitComplete:
                         self.InitDevice()
-                    self.MasterEmulation()
+                    else:
+                        self.MasterEmulation()
                     if self.IsStopSignaled("ProcessThread"):
                         break
                     if self.IsStopping:
@@ -324,7 +335,7 @@ class GeneratorController(MySupport):
             if not Divider == None:
                 FloatValue = IntValue / Divider
                 if ReturnFloat:
-                    return FloatValue
+                    return round(FloatValue,3)
                 return "%2.1f %s" % (FloatValue, LabelStr)
             return "%d %s" % (IntValue, LabelStr)
         except Exception as e1:
@@ -363,7 +374,7 @@ class GeneratorController(MySupport):
             if not Divider == None:
                 FloatValue = IntValue / Divider
                 if ReturnFloat:
-                    return FloatValue
+                    return round(FloatValue,3)
                 if not Label == None:
                     return "%.2f %s" % (FloatValue, Label)
                 else:
@@ -537,7 +548,7 @@ class GeneratorController(MySupport):
         return "Test Controller"
 
     #----------  GeneratorController:ComminicationsIsActive  -------------------
-    # Called every 2 seconds, if communictions are failing, return False, otherwise
+    # Called every few seconds, if communictions are failing, return False, otherwise
     # True
     def ComminicationsIsActive(self):
         return False
@@ -1040,10 +1051,7 @@ class GeneratorController(MySupport):
                 struct_time = time.strptime(Items[0], "%x %X")
                 LogEntryTime = datetime.datetime.fromtimestamp(time.mktime(struct_time))
 
-                if LastTime != None:
-                    if LogEntryTime > LastTime:
-                        self.LogError("Error in GetAveragePower: time sequence error")
-
+                # Changes in Daylight savings time will effect this
                 if LastTime == None or Power == 0:
                     TotalTime += LogEntryTime - LogEntryTime
                 else:
@@ -1125,6 +1133,28 @@ class GeneratorController(MySupport):
             except Exception as e1:
                 self.LogErrorLine("Error in PowerMeter: " + str(e1))
 
+    #----------  GeneratorController::GetFuelInTank------------------------------
+    def GetFuelInTank(self, ReturnFloat = False):
+
+        try:
+            if self.TankSize == 0:
+                return None
+
+            if self.UseMetric:
+                Units = "L"
+            else:
+                Units = "gal"
+
+            FuelLevel = self.GetFuelLevel(ReturnFloat = True)
+            FuelLevel = (FuelLevel * 0.01) * float(self.TankSize)
+
+            if ReturnFloat:
+                return float(FuelLevel)
+            else:
+                return "%.2f %s" % (FuelLevel, Units)
+        except Exception as e1:
+            self.LogErrorLine("Error in GetFuelInTank: " + str(e1))
+            return None
     #----------  GeneratorController::GetFuelLevel------------------------------
     def GetFuelLevel(self, ReturnFloat = False):
         # return 0 - 100 or None
@@ -1249,28 +1279,60 @@ class GeneratorController(MySupport):
         return False
 
     #----------  GeneratorController::GetRemainingFuelTime------------------------
-    def GetRemainingFuelTime(self, ReturnFloat = False):
+    def GetRemainingFuelTime(self, ReturnFloat = False, Actual = False):
 
         try:
             if not self.FuelConsumptionGaugeSupported():
                 return None
-            if not self.FuelTankCalculationSupported() and not self.FuelSensorSupported():
+            if not self.ExternalFuelDataSupported() and not self.FuelTankCalculationSupported() and not self.FuelSensorSupported():
                 return None
             if self.TankSize == 0:
                 return None
 
-            FuelLevel = self.GetEstimatedFuelInTank(ReturnFloat = True)
+            FuelLevel = self.GetFuelLevel(ReturnFloat = True)
+            FuelRemaining = self.TankSize * (FuelLevel / 100.0)
 
-            if FuelLevel == None:
+            if Actual:
+                PowerValue = self.GetPowerOutput(ReturnFloat = True)
+            else:
+                PowerValue = self.EstimateLoad * int(self.NominalKW)
+
+            if PowerValue == 0:
                 return None
 
-            FuelRemaining = FuelLevel
-
-            FuelPerHour, Units = self.GetFuelConsumption(self.EstimateLoad * int(self.NominalKW), 60 * 60)
+            FuelPerHour, Units = self.GetFuelConsumption(PowerValue, 60 * 60)
             if FuelPerHour == None or not len(Units):
                 return None
             if FuelPerHour == 0:
                 return None
+
+            try:
+                # make sure our units are correct
+                # 1 cubic foot propane = 0.0278 gallons propane
+                # 1 gallon propane = 35.97 cubic feet propane
+                # 1 cubic foot natural gas = 0.012 gallons natural gas
+                # 1 gallon natural gas = 82.62 cubic feet natural gas
+                if Units.lower() == "cubic feet" and self.UseMetric == False:
+                    # this means that fuel left is gallons and fuel per hour is cubic feet
+                    # so convert remaining fuel from gallons to cu ft
+                    if self.FuelType == "Natural Gas":
+                        # 1 gallon natural gas = 82.62 cubic feet natural gas
+                        FuelRemaining = FuelRemaining * 82.62
+                    else:
+                        # 1 gallon propane = 35.97 cubic feet propane
+                        FuelRemaining = FuelRemaining * 35.97
+                elif Units.lower() == "gal" and self.UseMetric == True:
+                    # this mean that fuel left is Liters, and fuel per hour is gallons
+                    # so convert remaining fuel to gallons
+                    # 1 L =  0.264172 gal
+                    FuelRemaining = FuelRemaining * 0.264172
+                elif Units.lower() == "cubic feet" and self.UseMetric == True:
+                    # this means that fuel left is Liters and fuel per hour is cu feet
+                    # so convert remaing fuel to cubic feet
+                    # 1 L = 0.0353147 cu ft
+                    FuelRemaining = FuelRemaining * 0.0353147
+            except Exception as e1:
+                self.LogErrorLine("Error in GetRemainingFuelTime (2): " + str(e1))
 
             HoursRemaining = FuelRemaining / FuelPerHour
 
@@ -1361,7 +1423,11 @@ class GeneratorController(MySupport):
         try:
             CmdList = command.split("=")
             if len(CmdList) == 2:
-                self.TankData = json.loads(CmdList[1])
+                with self.ExternalDataLock:
+                    self.TankData = json.loads(CmdList[1])
+                if not self.UseExternalFuelData:
+                    self.UseExternalFuelData = True
+                    self.SetupTiles()
             else:
                 self.LogError("Error in  SetExternalTankData: invalid input")
                 return "Error"
@@ -1369,6 +1435,39 @@ class GeneratorController(MySupport):
             self.LogErrorLine("Error in SetExternalTankData: " + str(e1))
             return "Error"
         return "OK"
+
+    #----------  GeneratorController::SetExternalCTData-------------------------
+    def SetExternalCTData(self, command):
+        try:
+            CmdList = command.split("=")
+            if len(CmdList) == 2:
+                with self.ExternalDataLock:
+                    self.ExternalCTData = json.loads(CmdList[1])
+                if not self.UseExternalCTData:
+                    self.UseExternalCTData = True
+                    self.SetupTiles()
+            else:
+                self.LogError("Error in  SetExternalTankData: invalid input")
+                return "Error"
+        except Exception as e1:
+            self.LogErrorLine("Error in SetExternalCTData: " + str(e1))
+            return "Error"
+        return "OK"
+
+    #----------  GeneratorController::GetExternalCTData-------------------------
+    def GetExternalCTData(self):
+        try:
+            if not self.UseExternalCTData:
+                return None
+            if self.ExternalCTData != None:
+                with self.ExternalDataLock:
+                    return self.ExternalCTData.copy()
+            else:
+                return None
+        except Exception as e1:
+            self.LogErrorLine("Error in GetExternalCTData: " + str(e1))
+            return None
+        return None
     #----------  GeneratorController::AddEntryToMaintLog------------------------
     def AddEntryToMaintLog(self, InputString):
 

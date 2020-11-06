@@ -41,6 +41,8 @@ function setuppython3() {
     usepython3=false
   elif [ $1 == "3" ]; then
     usepython3=true
+  elif [ $1 == "2" ]; then
+    usepython3=false
   else
     usepython3=false
   fi
@@ -85,6 +87,11 @@ function updatelibraries() {
   sudo $pipcommand install ldap3 -U
   sudo $pipcommand install pyasn1 -U
   sudo $pipcommand install smbus -U
+  if [ "$usepython3" = true ] ; then
+    sudo $pipcommand install pyotp -U
+  else
+    sudo $pipcommand install pyotp==2.3.0 -U
+  fi
   echo "Done."
 }
 
@@ -141,6 +148,12 @@ function installgenmon() {
     sudo $pipcommand install pysnmp
     sudo $pipcommand install ldap3
     sudo $pipcommand install smbus
+    sudo $pipcommand install pyotp
+    if [ "$usepython3" = true ] ; then
+      sudo $pipcommand install pyotp
+    else
+      sudo $pipcommand install pyotp==2.3.0
+    fi
     # correct problem with LDAP3 module install
     sudo $pipcommand install pyasn1 -U
 
@@ -272,7 +285,7 @@ function printhelp() {
   echo "  -C           Remove *.pyc files (clean pre-compiled python files)"
   echo "  -n           Do not prompt for Y/N, assume yes"
   echo "  -c           Specifiy full path to config file directory"
-  echo "  -p           Use python 3 instead of python 2.7"
+  echo "  -p           Specifiy 2 or 3 for python version. 2 is default"
   echo "  -s           Just copy conf files"
   echo "  -h           Display help"
   echo ""

@@ -189,7 +189,11 @@ class MySupport(MyCommon):
             if not NoString:
                 return input
             InputArray = input.strip().split(" ")
-            if len(InputArray) == 2:
+            if len(InputArray) == 1:
+                return input
+            if len(InputArray) == 2 or len(InputArray) == 3:
+                if len(InputArray) == 3:    # this handles two word untis like 'cubic feet'
+                    InputArray[1] = InputArray[1] + " " + InputArray[2]
                 if type == int:
                     InputArray[0] = int(InputArray[0])
                 elif type == float:
@@ -367,11 +371,11 @@ class MySupport(MyCommon):
     #----------  MySupport::GetDeltaTimeMinutes-------------------------------
     def GetDeltaTimeMinutes(self, DeltaTime):
 
-        days, seconds = DeltaTime.days, DeltaTime.seconds
-        delta_hours = days * 24 + seconds // 3600
-        delta_minutes = (seconds % 3600) // 60
+        days, seconds = float(DeltaTime.days), float(DeltaTime.seconds)
+        delta_hours = days * 24.0 + seconds // 3600.0
+        delta_minutes = (seconds % 3600.0) // 60.0
 
-        return (delta_hours * 60 + delta_minutes)
+        return (delta_hours * 60.0 + delta_minutes)
 
     #---------------------MySupport::ReadCSVFile--------------------------------
     # read a CSV file, return a list of lists
@@ -400,7 +404,7 @@ class MySupport(MyCommon):
         if configfilepath == None or configfilepath == "":
             configfilepath = MyCommon.DefaultConfPath
 
-        config = MyConfig(configfilepath + "genmon.conf", section = "GenMon", log = log)
+        config = MyConfig(os.path.join(configfilepath, "genmon.conf"), section = "GenMon", log = log)
         loglocation = config.ReadValue('loglocation', default = ProgramDefaults.LogPath)
         port = config.ReadValue('server_port', return_type = int, default = ProgramDefaults.ServerPort)
 

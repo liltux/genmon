@@ -49,15 +49,15 @@ class Loader(MySupport):
         if localinit == True:
             self.configfile = self.ConfigFileName
         else:
-            self.configfile = self.ConfigFilePath + self.ConfigFileName
+            self.configfile = os.path.join(self.ConfigFilePath, self.ConfigFileName)
 
-        self.ModulePath = os.path.dirname(os.path.realpath(__file__)) + "/"
-        self.ConfPath = os.path.dirname(os.path.realpath(__file__)) + "/conf/"
+        self.ModulePath = os.path.dirname(os.path.realpath(__file__))
+        self.ConfPath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "conf")
 
 
         # log errors in this module to a file
         if log == None:
-            self.log = SetupLogger("genloader", loglocation + "genloader.log")
+            self.log = SetupLogger("genloader", os.path.join(loglocation, "genloader.log"))
         else:
             self.log = log
 
@@ -90,8 +90,14 @@ class Loader(MySupport):
 
             if not self.ValidateConfig():
                 self.CopyConfFile()
-                self.LogInfo("Error validating config. Exiting")
-                sys.exit(2)
+                self.LogInfo("Error validating config. Retrying..")
+                self.config = MyConfig(filename = self.configfile, section = "genmon", log = self.log)
+                if not self.GetConfig():
+                    self.LogInfo("Error reading config file, 2nd attempt, Exiting")
+                    sys.exit(2)
+                if not self.ValidateConfig():
+                    self.LogInfo("Error validating config file, Exiting")
+                    sys.exit(2)
 
             self.LoadOrder = self.GetLoadOrder()
 
@@ -107,8 +113,8 @@ class Loader(MySupport):
     #---------------------------------------------------------------------------
     def CopyConfFile(self):
 
-        if os.path.isfile(self.ConfPath + self.ConfigFileName):
-            copyfile(self.ConfPath + self.ConfigFileName , self.configfile)
+        if os.path.isfile(os.path.join(self.ConfPath, self.ConfigFileName)):
+            copyfile(os.path.join(self.ConfPath, self.ConfigFileName) , self.configfile)
             return True
         else:
             self.LogInfo("Unable to find config file.")
@@ -120,23 +126,30 @@ class Loader(MySupport):
         # this function checks the system to see if the required libraries are
         # installed. If they are not then an attempt is made to install them.
         ModuleList = [
-            # [import name , install name]
-            ['flask','flask'],
-            ['configparser','configparser'],
-            ['serial','pyserial'],
-            ['crcmod','crcmod'],
-            ['pyowm','pyowm'],
-            ['pytz','pytz'],
-            ['pysnmp','pysnmp'],
-            ['ldap3','ldap3'],
-            ['smbus','smbus']
+            # [import name , install name, Python2.7 version]
+            ['flask','flask', None],                # Web server
+            # we will not use the check for configparser as this look like it is in backports on 2.7
+            # and our myconfig modules uses the default so this generates an error that is not warranted
+            #['configparser','configparser',None],   # reading config files
+            ['serial','pyserial',None],             # Serial
+            ['crcmod','crcmod',None],               # Modbus CRC
+            ['pyowm','pyowm','2.9.0'],              # Open Weather API
+            ['pytz','pytz',None],                   # Time zone support
+            ['pysnmp','pysnmp',None],               # SNMP
+            ['ldap3','ldap3',None],                 # LDAP
+            ['smbus','smbus',None],                 # SMBus reading of temp sensors
+            ['pyotp','pyotp','2.3.0']               # 2FA support
         ]
         try:
             ErrorOccured = False
+
+            # This will check if pip is installed
+            #if "linux" in sys.platform:
+            #    self.CheckBaseSoftware()
             for Module in ModuleList:
                 if not self.LibraryIsInstalled(Module[0]):
                     self.LogInfo("Warning: required library " + Module[1] + " not installed. Attempting to install....")
-                    if not self.InstallLibrary(Module[1]):
+                    if not self.InstallLibrary(Module[1], version = Module[2]):
                         self.LogInfo("Error: unable to install library " + Module[1])
                         ErrorOccured = True
                     if Module[0] == "ldap3":
@@ -146,6 +159,54 @@ class Loader(MySupport):
             return not ErrorOccured
         except Exception as e1:
             self.LogInfo("Error in CheckSystem: " + str(e1), LogLine = True)
+            return False
+
+    #---------------------------------------------------------------------------
+    def CheckBaseSoftware(self):
+
+        try:
+            if sys.version_info[0] < 3:
+                pipProgram = "pip"
+            else:
+                pipProgram = "pip3"
+
+            install_list = [pipProgram, '-V']
+            process = Popen(install_list, stdout=PIPE, stderr=PIPE)
+            output, _error = process.communicate()
+
+            if _error:
+                self.LogInfo("Error in CheckBaseSoftware  : " + libraryname + " : " + str(_error))
+            rc = process.returncode
+
+            return True
+        except Exception as e1:
+            self.LogInfo("Error in CheckBaseSoftware: " + str(e1), LogLine = True)
+            self.InstallBaseSoftware()
+            return False
+
+    #---------------------------------------------------------------------------
+    def InstallBaseSoftware(self):
+
+        try:
+            if sys.version_info[0] < 3:
+                pipProgram = "python-pip"
+            else:
+                pipProgram = "python3-pip"
+
+            install_list = ["sudo","apt-get","-yqq","update"]
+            process = Popen(install_list, stdout=PIPE, stderr=PIPE)
+            output, _error = process.communicate()
+
+            if _error:
+                self.LogInfo("Error in InstallBaseSoftware  : " + libraryname + " : " + str(_error))
+            rc = process.returncode
+
+            install_list = ["sudo","apt-get","-yqq","install", pipProgram]
+            process = Popen(install_list, stdout=PIPE, stderr=PIPE)
+            output, _error = process.communicate()
+            return True
+        except Exception as e1:
+            self.LogInfo("Error in CheckBaseSoftware: " + str(e1), LogLine = True)
             return False
 
     #---------------------------------------------------------------------------
@@ -221,13 +282,16 @@ class Loader(MySupport):
             return False
 
     #---------------------------------------------------------------------------
-    def InstallLibrary(self, libraryname, update = False):
+    def InstallLibrary(self, libraryname, update = False, version = None):
 
         try:
             if sys.version_info[0] < 3:
                 pipProgram = "pip"
+                if version != None:
+                    libraryname = libraryname + "=="+ version
             else:
                 pipProgram = "pip3"
+
 
             if update:
                 install_list = [pipProgram, 'install', libraryname, '-U']
@@ -256,8 +320,8 @@ class Loader(MySupport):
         for Module, Settiings in self.CachedConfig.items():
             try:
                 if self.CachedConfig[Module]["enable"]:
-                    if not os.path.isfile(self.ModulePath + self.CachedConfig[Module]["module"]):
-                        self.LogInfo("Enable to find file " + self.ModulePath + self.CachedConfig[Module]["module"])
+                    if not os.path.isfile(os.path.join(self.ModulePath, self.CachedConfig[Module]["module"])):
+                        self.LogInfo("Enable to find file " + os.path.join(self.ModulePath, self.CachedConfig[Module]["module"]))
                         ErrorOccured = True
 
                 # validate config file and if it is not there then copy it.
@@ -265,17 +329,27 @@ class Loader(MySupport):
                     ConfFileList = self.CachedConfig[Module]["conffile"].split(",")
                     for ConfigFile in ConfFileList:
                         ConfigFile = ConfigFile.strip()
-                        if not os.path.isfile(self.ConfigFilePath + ConfigFile):
-                            if os.path.isfile(self.ConfPath + ConfigFile):
+                        if not os.path.isfile(os.path.join(self.ConfigFilePath, ConfigFile)):
+                            if os.path.isfile(os.path.join(self.ConfPath, ConfigFile)):
                                 self.LogInfo("Copying " + ConfigFile + " to " + self.ConfigFilePath )
-                                copyfile(self.ConfPath + ConfigFile , self.ConfigFilePath + ConfigFile)
+                                copyfile(os.path.join(self.ConfPath, ConfigFile) , os.path.join(self.ConfigFilePath, ConfigFile))
                             else:
-                                self.LogInfo("Enable to find config file " + self.ConfPath + ConfigFile)
+                                self.LogInfo("Enable to find config file " + os.path.join(self.ConfPath, ConfigFile))
                                 ErrorOccured = True
             except Exception as e1:
                 self.LogInfo("Error validating config for " + Module + " : " + str(e1), LogLine = True)
                 return False
 
+        try:
+            if not self.CachedConfig["genmon"]["enable"]:
+                self.LogError("Warning: Genmon is not enabled, assume corrupt file.")
+                ErrorOccured = True
+            if not self.CachedConfig["genserv"]["enable"]:
+                self.LogError("Warning: Genserv is not enabled")
+
+        except Exception as e1:
+            self.LogErrorLine("Error in ValidateConfig, possible corrupt file. " + str(e1))
+            ErrorOccured = True
         return not ErrorOccured
 
     #---------------------------------------------------------------------------
@@ -496,7 +570,12 @@ class Loader(MySupport):
     #---------------------------------------------------------------------------
     def LoadModule(self, path, modulename, args = None):
         try:
-            fullmodulename = path + modulename
+            try:
+                import os
+                fullmodulename = os.path.join(path, modulename)
+            except Exception as e1:
+                fullmodulename = path + "/" + modulename
+
             if args != None:
                 self.LogConsole("Starting " + fullmodulename + " " + args)
             else:
@@ -526,7 +605,7 @@ class Loader(MySupport):
             return True
 
         except Exception as e1:
-            self.LogInfo("Error loading module " + modulename + ": " + str(e1), LogLine = True)
+            self.LogInfo("Error loading module " + path + ": "+ modulename + ": " + str(e1), LogLine = True)
             return False
     #---------------------------------------------------------------------------
     def UnloadModule(self, path, modulename, pid = None, HardStop = False, UsePID = False):

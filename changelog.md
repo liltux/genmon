@@ -1,23 +1,93 @@
 # Change Log
-All notable changes to this project will be documented in this file. 
+All notable changes to this project will be documented in this file.
 
-## V1.14.29 - 2020-02-10
+## V1.15.09 - 2020-11-05
+- Rounded value written to power log to 3 decimal places (Evolution)
+- Corrected issue with email errors relating to RFC2821 (see https://tools.ietf.org/html/rfc2821#section-3.3)
+- More improvements to better detect and recover modbus sync issues when using serial over TCP with weak wifi signals
+- Improvemnt in gensnmp.py to clean up on restarts (thanks @liltux)
+- Minor cleanup on genmqtt.py
+
+## V1.15.08 - 2020-10-27
+- Additional parameter validation for values read from conf file
+- More recovery / error handling for long latency modbus response
+
+## V1.15.07 - 2020-10-25
+- Added new alarm code for Evolution
+- Improvement on error recovery on time out errors (mostly occuring on bad wifi connections with serial over TCP)
+
+## V1.15.06 - 2020-10-20
+- added python functions to aid in portablity (os.path.join)
+- Corrected typo in web interface (thanks @danielforster)
+- More minor corrections for python 3.x
+- Moved location of version info in source tree for maintenance reasons. This required a small change in the sotware update check code
+
+## V1.15.05 - 2020-10-18
+- Added alarm code for Fuse Problem with Evoltuion Air Cooled
+- Reverted to older config file write functions as the new ones did not provide the benefit expected
+- Corrected one typo
+- Fix for checking for software update bug
+- Additional minor fix for pyton 3.x
+
+## V1.15.04 - 2020-10-16
+- Minor update to correct issue with software update check when using python 3.x
+- Minor improvements that could help bad wifi when using serial over TCP over wifi
+- Update to install script that will make move from python 2.7 to 3.x easier
+
+## V1.15.03 - 2020-10-11
+- Minor update to correct issue with writing config file
+- Added additional checks to look for corrupt config file and restore the file if corrupted
+- Changed some add on fields to hide passwords
+- Allow external tank data to be used in calculating time remaining until tank empty
+- Correct typos
+- Update to gensnmp.py to fix issue with H100 alarm list
+- Update to include fuel remainging based on estimated and current load assumptions
+- Added Fuel In Tank output on Maintenance page
+
+## V1.15.02 - 2020-10-07
+- Minor fix to allow some pre-Nexus models to correctly perform a model lookup
+
+## V1.15.01 - 2020-10-05
+- Minor update that changes the format of register and log submissions to comply with RFC 2821 #4.5.3.1.
+
+## V1.15.00 - 2020-10-02
+- Implimented fix for Evolution 2 firmware 1.1x
+- Added client id parameter for genmqtt add on
+
+## V1.14.33 - 2020-09-28
+- Updated myplatform.py to reflects some raspbian updates
+- moves some constants around in the modbus code in preperation for future modifications
+- Updated gensnmp.py to include OID for H and G Panel alarm list
+
+## V1.14.32 - 2020-09-20
+- Added multi-factor authentication to web interface settings
+
+## V1.14.31 - 2020-09-17
+- Added ESSID to WiFi platform information
+- Updated myplaform.py to detect Pi4 and display CPU temp
+
+## V1.14.30 - 2020-09-11
+- Updagte to MQTT support to allow list of strings to be a parameter
+- Added advanced parameter to better support weak wifi signals on serial over TCP
+- Made Evolution 2.0 Ambient temp sensor display respond to Use Metric setting
+
+## V1.14.29 - 2020-09-02
 - Added more info to upgrade and communications failure notice emails
 
-## V1.14.28 - 2020-31-09
+## V1.14.28 - 2020-08-31
 - Added logout button in top right if using username/password to login to the web interface. Thanks @buschauer
 - Made the service journal editable. Thanks @buschauer
 
-## V1.14.27 - 2020-29-09
+## V1.14.27 - 2020-08-29
 - Design update in preperation for future updates
 
-## V1.14.26 - 2020-19-09
+## V1.14.26 - 2020-08-19
 - Minor modification to gentankutil add on to compensate for changed web login at tankutility.com
 
-## V1.14.25 - 2020-19-09
+## V1.14.25 - 2020-08-19
 - Added new alarm code for Nexus Liquid Cooled and Evoltion Air Cooled
 
-## V1.14.24 - 2020-17-09
+## V1.14.24 - 2020-08-17
 - Corrected bug introduced in V1.14.23 that prevented logging of outages
 
 ## V1.14.23 - 2020-08-09

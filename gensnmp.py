@@ -106,8 +106,9 @@ class GenSNMP(MySupport):
         self.log = SetupLogger("gensnmp", self.LogFileName)
 
         self.console = SetupLogger("gensnmp_console", log_file = "", stream = True)
-
+        self.mibData = []
         self.LastValues = {}
+        self.transportDispatcher = None
 
         self.MonitorAddress = host
         self.debug = False
@@ -164,8 +165,8 @@ class GenSNMP(MySupport):
             self.Threads["SNMPThread"].Start()
 
             atexit.register(self.Close)
-            #signal.signal(signal.SIGTERM, self.Close)
-            #signal.signal(signal.SIGINT, self.Close)
+            signal.signal(signal.SIGTERM, self.Close)
+            signal.signal(signal.SIGINT, self.Close)
             self.SetupSNMP() # Must be last since we do not return from this call
 
         except Exception as e1:
@@ -208,6 +209,8 @@ class GenSNMP(MySupport):
     def UpdateSNMPData(self, Path, Value):
 
         try:
+            if self.transportDispatcher == None:
+                return
             oid = self.GetOID(Path)
             if oid == None:
                 return
@@ -269,11 +272,9 @@ class GenSNMP(MySupport):
                 self.LogError("Error: Invalid controller type")
                 return
 
-            self.mibData = [
-                # sorted by object name
-                MyOID((1,3,6,1,2,1,1,1),return_type = str, description = "SysDescr", default = "Genmon Generator Monitor",log = self.log),
-                MyOID((1,3,6,1,2,1,1,3,0),return_type = type(TimeTicks), description = "Uptime",log = self.log)
-            ]
+            self.mibData.append(MyOID((1,3,6,1,2,1,1,1),return_type = str, description = "SysDescr", default = "Genmon Generator Monitor",log = self.log))
+            self.mibData.append(MyOID((1,3,6,1,2,1,1,3,0),return_type = type(TimeTicks), description = "Uptime",log = self.log))
+
             if self.ControllerIsEvolutionNexus():
                 self.LogDebug("Evo/Nexus")
                 # Status Engine
@@ -320,7 +321,9 @@ class GenSNMP(MySupport):
                 self.AddOID((CtlID,1,0,12),return_type = str, description = "Fuel30", default = " ", keywords = ["Maintenance","Fuel Consumption in last 30 days"])
                 self.AddOID((CtlID,1,0,13),return_type = str, description = "TotalFuelUsed", default = " ", keywords = ["Maintenance","Total Power Log Fuel Consumption"])
                 self.AddOID((CtlID,1,0,14),return_type = str, description = "RunHours30", default = " ", keywords = ["Maintenance","Run Hours in last 30 days"])
-                self.AddOID((CtlID,1,0,15),return_type = str, description = "EstHoursInTank", default = " ", keywords = ["Maintenance","Hours of Fuel Remaining"])
+                self.AddOID((CtlID,1,0,15),return_type = str, description = "EstHoursInTank", default = " ", keywords = ["Maintenance","Hours of Fuel Remaining","Estimated"])
+                self.AddOID((CtlID,1,0,16),return_type = str, description = "LoadHoursInTank", default = " ", keywords = ["Maintenance","Hours of Fuel Remaining","Current"])
+                self.AddOID((CtlID,1,0,17),return_type = str, description = "FuelInTank", default = " ", keywords = ["Maintenance","Fuel In Tank (Sensor)"])
 
                 #Maintenance->Controller Settings
                 self.AddOID((CtlID,1,1,0),return_type = str, description = "CalCurrent1", default = " ", keywords = ["Maintenance/Controller Settings","Calibrate Current 1"])
@@ -380,6 +383,8 @@ class GenSNMP(MySupport):
                 # Alarms
                 self.AddOID((CtlID,0,1,0),return_type = str, description = "ActiveAlarms", default = " ", keywords = ["Status/Alarms","Number of Active Alarms"])
                 self.AddOID((CtlID,0,1,1),return_type = str, description = "AckAlarms", default = " ", keywords = ["Status/Alarms","Number of Acknowledged Alarms"])
+                self.AddOID((CtlID,0,1,2),return_type = str, description = "AlarmList", default = " ", keywords = ["Status/Alarms","Alarm List"])
+
                 # Battery
                 self.AddOID((CtlID,0,2,0),return_type = str, description = "BatteryVoltage", default = " ", keywords = ["Status/Battery","Battery Voltage"])
                 self.AddOID((CtlID,0,2,1),return_type = str, description = "BatteryCurrent", default = " ", keywords = ["Status/Battery","Battery Charger Current"])
@@ -389,6 +394,7 @@ class GenSNMP(MySupport):
                 # Status Time
                 self.AddOID((CtlID,0,3,0),return_type = str, description = "MonitorTime", default = " ", keywords = ["Status/Time","Monitor Time"])
                 self.AddOID((CtlID,0,3,1),return_type = str, description = "GeneratorTime", default = " ", keywords = ["Status/Time","Generator Time"])
+                # TODO selected H-100 Maint items?
 
             # Monitor->Generator Monitor Stats
             self.AddOID((CtlID,4,0,0),return_type = str, description = "MonitorHealth", default = "Unknown", keywords = ["Monitor","Monitor Health"])
@@ -425,40 +431,52 @@ class GenSNMP(MySupport):
             for mibVar in self.mibData:
                 self.mibDataIdx[mibVar.name] = mibVar
 
-            transportDispatcher = AsyncoreDispatcher()
-            transportDispatcher.registerRecvCbFun(self.SnmpCallbackFunction)
+            self.transportDispatcher = AsyncoreDispatcher()
+            self.transportDispatcher.registerRecvCbFun(self.SnmpCallbackFunction)
 
             # UDP/IPv4
-            transportDispatcher.registerTransport(
+            self.transportDispatcher.registerTransport(
                 udp.domainName, udp.UdpSocketTransport().openServerMode(('0.0.0.0', 161))
             )
 
             # UDP/IPv6
-            transportDispatcher.registerTransport(
+            self.transportDispatcher.registerTransport(
                 udp6.domainName, udp6.Udp6SocketTransport().openServerMode(('::', 161))
             )
 
             ## Local domain socket
-            # transportDispatcher.registerTransport(
+            # self.transportDispatcher.registerTransport(
             #    unix.domainName, unix.UnixSocketTransport().openServerMode('/tmp/snmp-agent')
             # )
 
-            transportDispatcher.jobStarted(1)
+            self.transportDispatcher.jobStarted(1)
 
-            while True:
-                try:
-                    # Dispatcher will never finish as job#1 never reaches zero
-                    transportDispatcher.runDispatcher()
-                except Exception as e1:
-                    transportDispatcher.closeDispatcher()
+            try:
+                # Dispatcher will never finish as job#1 never reaches zero
+                if self.transportDispatcher != None:
+                    self.transportDispatcher.runDispatcher()
+            except Exception as e1:
+                self.SnmpClose()
+                if self.transportDispatcher != None:
                     self.LogErrorLine("Fatal Error in SetupSNMP: " + str(e1))
-
+                else:
+                    # we are exiting
+                    self.LogDebug("Exit Snmp Engine")
 
         except Exception as e1:
             self.LogErrorLine("Error in SetupSNMP: " + str(e1))
+            self.SnmpClose()
+
+    #----------  GenSNMP::SnmpClose --------------------------------------------
+    def SnmpClose(self):
+
+        if self.transportDispatcher != None:
+            self.transportDispatcher.closeDispatcher()
+            self.LogDebug("Dispatcher Closed")
+            self.transportDispatcher = None
 
     #----------  GenSNMP::SnmpCallbackFunction ---------------------------------
-    def SnmpCallbackFunction(self,transportDispatcher, transportDomain, transportAddress, wholeMsg):
+    def SnmpCallbackFunction(self, transportDispatcher, transportDomain, transportAddress, wholeMsg):
         while wholeMsg:
             try:
                 msgVer = api.decodeMessageVersion(wholeMsg)
@@ -568,12 +586,14 @@ class GenSNMP(MySupport):
                     self.CheckDictForChanges(GenmonDict, "home")
 
                     if self.WaitForExit("SNMPThread", float(self.PollTime)):
+                        self.SnmpClose()
                         return
                 except Exception as e1:
                     self.LogErrorLine("Error in SNMPThread: (parse) : " + str(e1))
             except Exception as e1:
                 self.LogErrorLine("Error in SNMPThread: " + str(e1))
                 if self.WaitForExit("SNMPThread", float(self.PollTime * 60)):
+                    self.SnmpClose()
                     return
 
     #------------ GenSNMP::CheckDictForChanges -------------------------------
@@ -593,20 +613,39 @@ class GenSNMP(MySupport):
                    self.CheckDictForChanges(item, CurrentPath)
                elif isinstance(item, list):
                    CurrentPath = PathPrefix + "/" + str(key)
-                   for listitem in item:
-                       if isinstance(listitem, dict):
-                           self.CheckDictForChanges(listitem, CurrentPath)
-                       elif isinstance(listitem, str) or isinstance(listitem, unicode):
-                           CurrentPath = PathPrefix + "/" + str(key)
-                           #todo list support
-                           pass
-                       else:
-                           self.LogError("Invalid type in CheckDictForChanges: %s %s (2)" % (key, str(type(listitem))))
+                   if self.ListIsStrings(item):
+                       # if this is a list of strings, the join the list to one comma separated string
+                       self.CheckForChanges(CurrentPath, ', '.join(item))
+                   else:
+                       for listitem in item:
+                           if isinstance(listitem, dict):
+                               self.CheckDictForChanges(listitem, CurrentPath)
+                           else:
+                               self.LogError("Invalid type in CheckDictForChanges: %s %s (2)" % (key, str(type(listitem))))
                else:
                    CurrentPath = PathPrefix + "/" + str(key)
                    self.CheckForChanges(CurrentPath, item)
         else:
            self.LogError("Invalid type in CheckDictForChanges %s " % str(type(node)))
+
+    # ---------- GenSNMP::ListIsStrings-----------------------------------------
+    # return true if every element of list is a string
+    def ListIsStrings(self, listinput):
+
+        try:
+            if not isinstance(listinput, list):
+                return False
+            for item in listinput:
+                if sys.version_info[0] < 3:
+                    if not (isinstance(item, str) or isinstance(item, unicode)):
+                        return False
+                else:
+                    if not (isinstance(item, str) or isinstance(item, bytes)):
+                        return False
+            return True
+        except Exception as e1:
+            self.LogErrorLine("Error in ListIsStrings: " + str(e1))
+            return False
 
     # ---------- GenSNMP::CheckForChanges-------------------------------------
     def CheckForChanges(self, Path, Value):
@@ -630,6 +669,7 @@ class GenSNMP(MySupport):
     def Close(self):
         self.LogError("GenSNMP Exit")
         self.KillThread("SNMPThread")
+        self.SnmpClose()
         self.Generator.Close()
 #-------------------------------------------------------------------------------
 if __name__ == "__main__":
@@ -659,11 +699,8 @@ if __name__ == "__main__":
             ConfigFilePath = ConfigFilePath.strip()
 
     port, loglocation = MySupport.GetGenmonInitInfo(ConfigFilePath, log = console)
-    log = SetupLogger("client", loglocation + "gensnmp.log")
+    log = SetupLogger("client", os.path.join(loglocation, "gensnmp.log"))
 
     GenSNMPInstance = GenSNMP(log = log, loglocation = loglocation, ConfigFilePath = ConfigFilePath, host = address, port = port)
-
-    while True:
-        time.sleep(0.5)
 
     sys.exit(1)

@@ -45,6 +45,7 @@ http_pass_ro = Sets the password of the limited rights user. Leave blank to disa
 http_port = HTTP port to be used by the web server.
 https_port = Port to override the secure web server port (https). The default value is 443.
 favicon = favicon for website. This is an optional parameter and default is "favicon.ico". This may not work in older browsers
+usemfa = Use Multi-Factor Authentication. You must use a Multi-Factor Authenticator app like Goolge Authenticator or Authy to use this feature. If enabled, MFA will apply to both normal and limited rights login.
 kwlogmax = Override the maximum size of the kW log. The default is 15MB.
 kwlog = Full path to override the default kW log. If this option is present but empty the kW log will be disabled.
 currentdivider = This is a value to override the divisor used to calculate the current for Evolution units. This value is expressed in floating point. Leave blank to use the default value.
@@ -78,15 +79,16 @@ smart_transfer_switch = If enabled a smart transfer switch is utilized and the g
 serialnumberifmissing= If the serial number is not present due to the controller being replaced you can override the missing serial number and still have the software lookup model information. This is a numeric value that must be ten digits. Pad leading zeros if you serial number is less than 10 digits.
 additionalrunhours= Nexus controllers (not Evolution) do not have the ability to set the run hours. If your controller has been replaced you can use this entry to add hours to the Run Hours reported by the in the UI. Note: If this option is used it will only modify the run hours displayed in the web interface. It will not affect the controllers internal maintenance counters. This value must be a numeric value.
 additional_modbus_timeout=Add this value (in seconds) to the modbus timeout value. Floating point value.
+watchdog_addition=Additionl delay before a communication timeout notification
 disablepowerlog=Enable to disable the power log and current reading. Not supported on Nexus.
-estimated_load=The percent load (expesses a a decimal value i.e. .5 = 50%) used when estimating the run hours left until the tank is empty.
+estimated_load=The percent load (expesses a a decimal value i.e. .5 = 50 percent) used when estimating the run hours left until the tank is empty.
 subtractfuel=The amount of fuel (gal or L, depending on 'Use Metric' setting) to subtract from the fuel in tank estimate
+half_rate=The unit of fuel for Half and Full Rate parameters
+full_rate=The number of units of fuel consumed by your generator at a full load
+fuel_units=The number of units of fuel consumed by your generator at a half load
 user_url=A user defined URL link to include in status emails sent from the software when the generator status changes
 usenominallinevolts = Enable overriding of the default of 240V for nominal line voltage in the UI
 nominallinevolts = Override nominal line voltage value for UI (i.e. 220, 230 in stead of 240)
-fuel_units=Units of Fuel Rate Half and Full Load parameters
-fuel_half=The volume of fuel used in an hour at half the rated load. Set to zero to disable fuel estimation.
-fuel_full=The volume of fuel used in an hour at the full rated load. Set to zero to disable fuel estimation.
 extend_wait = Number of additional seconds to wait to retry sending failed emails.
 min_outage_duration = Outages less than this time in seconds will not be logged. Notifications will still be sent if enabled.
 [generac_evo_nexus]
@@ -97,8 +99,7 @@ min_outage_duration = Outages less than this time in seconds will not be logged.
 0007=Engine RPM
 0008=Engine Frequency Hz
 000a=Battery Voltage
-000b=Engine Run Hours High (Nexus, EvoAC)
-000c=Engine Run Hours Low (Nexus, EvoAC)
+000b=Engine Run Hours (Nexus, EvoAC)
 000e=Generator Time HH:MM
 000f=Generator Time Hi = month, Lo = day of the month
 0010=Generator Time Hi Day of Week, Lo = year
@@ -130,8 +131,7 @@ min_outage_duration = Outages less than this time in seconds will not be logged.
 0058=Hall Effect Sensor (EvoLC)
 0059=Rated Volts (EvolLC)
 005a=Rated Frequency (EvoLC)
-005e=Engine Run Minutes High (EvoLC)
-005f=Engine Run Minutes Low (EvoLC)
+005e=Engine Run Minutes (EvoLC)
 000d=Bit changes when the controller is updating registers.
 003c=Raw RPM Sensor
 005d=Fuel Level Sensor (EvoLC)

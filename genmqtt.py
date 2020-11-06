@@ -57,6 +57,7 @@ class MyGenPush(MySupport):
 
         self.UseNumeric = use_numeric
         self.debug = debug
+        self.Exiting = False
 
         if polltime == None:
             self.PollTime = 3
@@ -67,7 +68,7 @@ class MyGenPush(MySupport):
             self.log = log
         else:
             # log errors in this module to a file
-            self.log = SetupLogger("client", loglocation + "mygenpush.log")
+            self.log = SetupLogger("client", os.path.join(loglocation, "mygenpush.log"))
 
         self.console = SetupLogger("mygenpush_console", log_file = "", stream = True)
 
@@ -232,20 +233,38 @@ class MyGenPush(MySupport):
                    self.CheckDictForChanges(item, CurrentPath)
                elif isinstance(item, list):
                    CurrentPath = PathPrefix + "/" + str(key)
-                   for listitem in item:
-                       if isinstance(listitem, dict):
-                           self.CheckDictForChanges(listitem, CurrentPath)
-                       elif isinstance(listitem, str) or isinstance(listitem, unicode):
-                           CurrentPath = PathPrefix + "/" + str(key)
-                           #todo list support
-                           pass
-                       else:
-                           self.LogError("Invalid type in CheckDictForChanges: %s %s (2)" % (key, str(type(listitem))))
+                   if self.ListIsStrings(item):
+                       # if this is a list of strings, the join the list to one comma separated string
+                       self.CheckForChanges(CurrentPath, ', '.join(item))
+                   else:
+                       for listitem in item:
+                           if isinstance(listitem, dict):
+                               self.CheckDictForChanges(listitem, CurrentPath)
+                           else:
+                               self.LogError("Invalid type in CheckDictForChanges: %s %s (2)" % (key, str(type(listitem))))
                else:
                    CurrentPath = PathPrefix + "/" + str(key)
                    self.CheckForChanges(CurrentPath, item)
         else:
            self.LogError("Invalid type in CheckDictForChanges %s " % str(type(node)))
+    # ---------- MyGenPush::ListIsStrings---------------------------------------
+    # return true if every element of list is a string
+    def ListIsStrings(self, listinput):
+
+        try:
+            if not isinstance(listinput, list):
+                return False
+            for item in listinput:
+                if sys.version_info[0] < 3:
+                    if not (isinstance(item, str) or isinstance(item, unicode)):
+                        return False
+                else:
+                    if not (isinstance(item, str) or isinstance(item, bytes)):
+                        return False
+            return True
+        except Exception as e1:
+            self.LogErrorLine("Error in ListIsStrings: " + str(e1))
+            return False
 
     # ---------- MyGenPush::CheckForChanges-------------------------------------
     def CheckForChanges(self, Path, Value):
@@ -269,6 +288,7 @@ class MyGenPush(MySupport):
              self.LogErrorLine("Error in mygenpush:CheckForChanges: " + str(e1))
     # ---------- MyGenPush::Close-----------------------------------------------
     def Close(self):
+        self.Exiting = True
         self.KillThread("PollingThread")
         self.Generator.Close()
 
@@ -285,7 +305,7 @@ class MyMQTT(MyCommon):
 
         super(MyMQTT, self).__init__()
 
-        self.LogFileName = loglocation + "genmqtt.log"
+        self.LogFileName = os.path.join(loglocation, "genmqtt.log")
 
         if log != None:
             self.log = log
@@ -297,6 +317,7 @@ class MyMQTT(MyCommon):
         # test
         self.console = SetupLogger("mymqtt_console", log_file = "", stream = True)
 
+        self.Exiting = False
         self.Username = None
         self.Password = None
 
@@ -312,11 +333,13 @@ class MyMQTT(MyCommon):
         self.debug = False
 
         try:
-            config = MyConfig(filename =  configfilepath + 'genmqtt.conf', section = 'genmqtt', log = log)
+            config = MyConfig(filename =  os.path.join(configfilepath, 'genmqtt.conf'), section = 'genmqtt', log = log)
 
             self.Username = config.ReadValue('username')
 
             self.Password = config.ReadValue('password')
+
+            self.ClientID = config.ReadValue('client_id', default = "genmon")
 
             self.MQTTAddress = config.ReadValue('mqtt_address')
 
@@ -366,12 +389,12 @@ class MyMQTT(MyCommon):
             else:
                 self.FlushInterval = float('inf')
         except Exception as e1:
-            self.LogErrorLine("Error reading " + configfilepath + "genmqtt.conf: " + str(e1))
-            self.console.error("Error reading " + configfilepath + "genmqtt.conf: " + str(e1))
+            self.LogErrorLine("Error reading " + os.path.join(configfilepath, "genmqtt.conf") + " : " + str(e1))
+            self.console.error("Error reading " + os.path.join(configfilepath, "genmqtt.conf") + " : " + str(e1))
             sys.exit(1)
 
         try:
-            self.MQTTclient = mqtt.Client(client_id = "genmon")
+            self.MQTTclient = mqtt.Client(client_id = self.ClientID)
             if self.Username != None and len(self.Username) and self.Password != None:
                 self.MQTTclient.username_pw_set(self.Username, password=self.Password)
 
@@ -495,7 +518,9 @@ class MyMQTT(MyCommon):
 
     # ---------- MyMQTT::Close--------------------------------------------------
     def Close(self):
+        self.LogDebug("Exiting MyMQTT")
         self.Push.Close()
+        self.Exiting = True
 #-------------------------------------------------------------------------------
 if __name__ == "__main__":
 
@@ -528,7 +553,7 @@ if __name__ == "__main__":
 
     InstanceMQTT = MyMQTT(host = address, port = port, loglocation = loglocation, configfilepath = ConfigFilePath)
 
-    while True:
+    while not InstanceMQTT.Exiting:
         time.sleep(0.5)
 
     sys.exit(1)

@@ -62,14 +62,14 @@ class MyMail(MySupport):
         self.UseBCC = False
         self.ExtendWait = 0
         self.Threads = {}                               # Dict of mythread objects
-        self.ModulePath = os.path.dirname(os.path.dirname(os.path.realpath(__file__))) + "/"
+        self.ModulePath = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
         # log errors in this module to a file
         if localinit == True:
             self.logfile = "mymail.log"
             self.configfile = "mymail.conf"
         else:
-            self.logfile = loglocation + "mymail.log"
-            self.configfile = self.ConfigFilePath + "mymail.conf"
+            self.logfile = os.path.join(loglocation, "mymail.log")
+            self.configfile = os.path.join(self.ConfigFilePath, "mymail.conf")
 
         if log == None:
             self.log = SetupLogger("mymail", self.logfile)
@@ -79,8 +79,8 @@ class MyMail(MySupport):
         # if mymail.conf is present attempt to copy it from the
         # main source directory
         if not os.path.isfile(self.configfile):
-            if os.path.isfile(self.ModulePath + "mymail.conf"):
-                copyfile(self.ModulePath + "mymail.conf" , self.configfile)
+            if os.path.join(os.path.isfile(self.ModulePath, "mymail.conf")):
+                copyfile(os.path.join(self.ModulePath, "mymail.conf") , self.configfile)
             else:
                 self.LogError("Missing config file : " + self.configfile)
                 sys.exit(1)
@@ -223,7 +223,8 @@ class MyMail(MySupport):
             if self.config.HasOption('usebcc'):
                 self.UseBCC = self.config.ReadValue('usebcc', return_type = bool)
 
-            self.ExtendWait = self.config.ReadValue('extend_wait', return_type = int, default = 0)
+            if self.config.HasOption('extend_wait'):
+                self.ExtendWait = self.config.ReadValue('extend_wait', return_type = int, default = 0)
 
             self.EmailPassword = self.config.ReadValue('email_pw', default = "")
             self.EmailPassword =  self.EmailPassword.strip()
@@ -381,11 +382,18 @@ class MyMail(MySupport):
 
         msg = MIMEMultipart()
         if self.SenderName == None or not len(self.SenderName):
-            msg['From'] = self.SenderAccount
+            msg['From'] = "<" + self.SenderAccount + ">"
         else:
             msg['From'] = self.SenderName + " <" + self.SenderAccount + ">"
             self.LogError(msg['From'])
 
+        try:
+            recipientList = recipient.strip().split(",")
+            recipient = ">,<"
+            recipient = recipient.join(recipientList)
+            recipient = "<" + recipient + ">"
+        except:
+            self.LogErrorLine("Error parsing recipient format")
         if self.UseBCC:
             msg['Bcc'] = recipient
         else:

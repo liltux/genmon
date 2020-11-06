@@ -20,6 +20,7 @@ var baseurl = pathname.concat("cmd/");
 var DaysOfWeekArray = ["Sunday","Monday","Tuesday","Wednesday", "Thursday", "Friday", "Saturday"];
 var MonthsOfYearArray = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 var BaseRegistersDescription = {};
+var QR_Code_URL = "";
 
 vex.defaultOptions.className = 'vex-theme-os'
 
@@ -231,7 +232,7 @@ function CreateMenu() {
 
     SetHeaderValues();
     $("#footer").html('<table border="0" width="100%" height="30px"><tr><td width="5%"><img class="tooltip alert_small" id="ajaxWarning" src="images/transparent.png" height="28px" width="28px" style="display: none;"></td><td width="90%"><a href="https://github.com/jgyates/genmon" target="_blank">GenMon Project on GitHub</a></td><td width="5%"></td></tr></table>');
-    $('#ajaxWarning').tooltipster({minWidth: '280px', maxWidth: '480px', animation: 'fade', updateAnimation: 'null', contentAsHTML: 'true', delay: 100, animationDuration: 200, side: ['top', 'left'], content: "No Communicatikon Errors occured"});
+    $('#ajaxWarning').tooltipster({minWidth: '280px', maxWidth: '480px', animation: 'fade', updateAnimation: 'null', contentAsHTML: 'true', delay: 100, animationDuration: 200, side: ['top', 'left'], content: "No Communication Errors occured"});
 
     if (myGenerator["pages"]["status"] == true)
        outstr += '<li id="status"><a><table width="100%" height="100%"><tr><td width="28px" align="right" valign="middle"><img class="status" src="images/transparent.png" width="20px" height="20px"></td><td valign="middle">&nbsp;Status</td></tr></table></a></li>';
@@ -1374,7 +1375,7 @@ function DisplayJournal(){
         processAjaxSuccess();
         allJournalEntries = result
 
-        var  outstr = 'Journal Entires:<br><br>';
+        var  outstr = 'Journal Entries:<br><br>';
         outstr += '<table id="alljournal" border="0" style="border-collapse: separate; border-spacing: 10px;" width="100%"><tbody>';
 
         $.each(Object.keys(result), function(i, key) {
@@ -1694,7 +1695,7 @@ function TestEmailSettings(smtp_server, smtp_port,email_account,sender_account,s
                        $('.vex-dialog-buttons').show();
                     } else {
                        vex.dialog.buttons.YES.text = 'Close';
-                       GenmonAlert("An error occured: <br>"+result+"<br><br>Please try again.");
+                       GenmonAlert("An error occurred: <br>"+result+"<br><br>Please try again.");
                        $('.vex-dialog-button-primary').text("Close");
                     }
       });
@@ -1783,6 +1784,12 @@ function DisplaySettings(){
                 outstr += '<br><button type="button" id="weathercityname" onclick="lookupLocation()">Look Up</button>';
               }
               outstr += '</td></tr>';
+            } else if (key == "usemfa") {
+              outstr += '<tr><td width="25px">&nbsp;</td><td width="300px">' + result[key][1] + '</td><td>' + printSettingsField(result[key][0], key, result[key][3], result[key][4], result[key][5], "toggleSectionInverse(true, 'usemfa');") + '</td></tr>';
+              outstr += '</table></fieldset><fieldset id="'+key+'Section"><table id="allsettings" border="0">';
+            } else if (key == "mfa_url") {
+              outstr += '<tr><td width="25px">&nbsp;</td><td width="300px">' + result[key][1] + '</td><td><div id="qrcode"></div></td></tr>'
+              QR_Code_URL = result[key][3];
             } else {
               outstr += '<tr><td width="25px">&nbsp;</td><td width="300px">' + result[key][1] + '</td><td>' + printSettingsField(result[key][0], key, result[key][3], result[key][4], result[key][5]) + '</td></tr>';
             }
@@ -1792,6 +1799,9 @@ function DisplaySettings(){
 
         $("#mydisplay").html(outstr);
         $('input').lc_switch();
+        if (QR_Code_URL != "") {
+          $("#qrcode").qrcode({width: 164,height: 164,text: QR_Code_URL});
+        }
         $.extend($.idealforms.rules, {
            // The rule is added as "ruleFunction:arg1:arg2"
            HTTPAddress: function(input, value, arg1, arg2) {
@@ -1841,6 +1851,7 @@ function DisplaySettings(){
         useSerialTCPChange(false);
         useFullTank(false);
         toggleSection(false, "useselfsignedcert");
+        toggleSectionInverse(false, "usemfa");
         toggleSectionInverse(false, "disablesmtp");
         toggleSectionInverse(false, "disableimap");
         toggleSectionInverse(false, "disableweather");
@@ -1861,6 +1872,9 @@ function usehttpsChange(animation) {
    if ($("#usehttps").is(":checked")) {
       $("#noneSecuritySettings").hide((animation ? 300 : 0));
       $("#usehttpsSection").show((animation ? 300 : 0));
+      if ($("#usemfa").is(":checked")) {
+        $("#usemfaSection").show((animation ? 300 : 0));
+      }
 
       if (!$("#useselfsignedcert").is(":checked")) {
          $("#useselfsignedcertSettings").show((animation ? 300 : 0));
@@ -1868,6 +1882,7 @@ function usehttpsChange(animation) {
    } else {
       $("#usehttpsSection").hide((animation ? 300 : 0));
       $("#noneSecuritySettings").show((animation ? 300 : 0));
+      $("#usemfaSection").hide((animation ? 300 : 0));
    }
    if (($('#http_port').val() == $('#http_port').attr('oldValue')) && ($("#usehttps").attr('oldValue') == ($("#usehttps").prop('checked') === true ? "true" : "false"))){
       $("#newURLnotify").hide((animation ? 300 : 0));
@@ -2381,12 +2396,13 @@ function DisplayAbout(){
     if (myGenerator["write_access"] == true) {
        if (latestVersion == "") {
          // var url = "https://api.github.com/repos/jgyates/genmon/releases";
-         var url = "https://raw.githubusercontent.com/jgyates/genmon/master/genmon.py";
+         var url = "https://raw.githubusercontent.com/jgyates/genmon/master/genmonlib/program_defaults.py";
          $.ajax({dataType: "html", url: url, timeout: 4000, error: function(result) {
                console.log("got an error when looking up latest version");
                latestVersion = "unknown";
          }, success: function(result) {
-               latestVersion = replaceAll((jQuery.grep(result.split("\n"), function( a ) { return (a.indexOf("GENMON_VERSION") >= 0); }))[0].split(" ")[2], '"', '');
+               latestVersion = replaceAll((jQuery.grep(result.split("\n"), function( a ) { return (a.indexOf("GENMON_VERSION") >= 0); }))[0].split("=")[1], '"', '');
+               latestVersion = latestVersion.trim()
                if (latestVersion != myGenerator["version"]) {
                      $('#updateNeeded').hide().html("<br>&nbsp;&nbsp;&nbsp;&nbsp;You are not running the latest version.<br>&nbsp;&nbsp;&nbsp;&nbsp;Current Version: " + myGenerator["version"] +"<br>&nbsp;&nbsp;&nbsp;&nbsp;New Version: " + latestVersion+"<br><br>").fadeIn(1000);
                }

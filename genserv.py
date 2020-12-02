@@ -270,7 +270,7 @@ def ProcessCommand(command):
             "getbase", "getsitename","setexercise", "setquiet", "setremote",
             "settime", "sendregisters", "sendlogfiles", "getdebug", "status_num_json",
             "get_maint_log_json", "add_maint_log", "clear_maint_log", "delete_row_maint_log",
-            "edit_row_maint_log", "support_data_json" ]:
+            "edit_row_maint_log", "support_data_json", 'fuel_log_clear' ]:
             finalcommand = "generator: " + command
 
             try:
@@ -408,6 +408,12 @@ def ProcessCommand(command):
                 # Now send the file
                 pathtofile = os.path.dirname(os.path.realpath(__file__))
                 return send_file(os.path.join(pathtofile, "genmon_backup.tar.gz"), as_attachment=True)
+        elif command in ["get_logs"]:
+            if session.get('write_access', True):
+                GetLogs()    # Create log archive file
+                # Now send the file
+                pathtofile = os.path.dirname(os.path.realpath(__file__))
+                return send_file(os.path.join(pathtofile, "genmon_logs.tar.gz"), as_attachment=True)
         elif command in ["test_email"]:
             return SendTestEmail(request.args.get('test_email', default = None, type=str))
         else:
@@ -531,6 +537,21 @@ def GetAddOns():
             bounds = 'number',
             display_name = "Software Debounce")
 
+        #GENGPIOLEDBLINK
+        AddOnCfg['gengpioledblink'] = collections.OrderedDict()
+        AddOnCfg['gengpioledblink']['enable'] = ConfigFiles[GENLOADER_CONFIG].ReadValue("enable", return_type = bool, section = "gengpioledblink", default = False)
+        AddOnCfg['gengpioledblink']['title'] = "Genmon GPIO Output to blink LED"
+        AddOnCfg['gengpioledblink']['description'] = "Genmon will blink LED connected to GPIO pin to indicate genmon status"
+        AddOnCfg['gengpioledblink']['icon'] = "rpi"
+        AddOnCfg['gengpioledblink']['url'] = "https://github.com/jgyates/genmon/wiki/1----Software-Overview#gengpioledblinkpy-optional"
+        AddOnCfg['gengpioledblink']['parameters'] =  collections.OrderedDict()
+        AddOnCfg['gengpioledblink']['parameters']['ledpin'] = CreateAddOnParam(
+            ConfigFiles[GENGPIOLEDBLINK_CONFIG].ReadValue("ledpin", return_type = int, default = 12),
+            'int',
+            "GPIO pin number that an LED is connected (valid numbers are 0 - 27)",
+            bounds = "required digits range:0:27",
+            display_name = "GPIO LED pin")
+
         #GENLOG
         AddOnCfg['genlog'] = collections.OrderedDict()
         AddOnCfg['genlog']['enable'] = ConfigFiles[GENLOADER_CONFIG].ReadValue("enable", return_type = bool, section = "genlog", default = False)
@@ -539,7 +560,7 @@ def GetAddOns():
         AddOnCfg['genlog']['icon'] = "csv"
         AddOnCfg['genlog']['url'] = "https://github.com/jgyates/genmon/wiki/1----Software-Overview#genlogpy-optional"
         AddOnCfg['genlog']['parameters'] = collections.OrderedDict()
-        Args = ConfigFiles[GENLOADER_CONFIG].ReadValue("args", return_type = str, section = "genlog", default = False)
+        Args = ConfigFiles[GENLOADER_CONFIG].ReadValue("args", return_type = str, section = "genlog", default = '-f /home/pi/genmon/LogFile.csv')
         ArgList = Args.split()
         if len(ArgList) == 2:
             Value = ArgList[1]
@@ -924,6 +945,12 @@ def GetAddOns():
             "The duration in minutes between poll of tank data.",
             bounds = 'number',
             display_name = "Poll Frequency")
+        AddOnCfg['gentankdiy']['parameters']['gauge_type'] = CreateAddOnParam(
+            ConfigFiles[GENTANKDIY_CONFIG].ReadValue("gauge_type", return_type = str, default = '1'),
+            'list',
+            "DIY sensor type. Valid optios are Type 1 and Type 2.",
+            bounds = '1,2',
+            display_name = "Sensor Type")
 
         #GENALEXA
         AddOnCfg['genalexa'] = collections.OrderedDict()
@@ -968,6 +995,12 @@ def GetAddOns():
             "SNMP Community string",
             bounds = 'minmax:4:50',
             display_name = "SNMP Community")
+        AddOnCfg['gensnmp']['parameters']['use_numeric'] = CreateAddOnParam(
+            ConfigFiles[GENSNMP_CONFIG].ReadValue("use_numeric", return_type = bool, default = False),
+            'boolean',
+            "If enabled will return numeric values (no units) in the Status, Maintenance (Evo/Nexus only) and Outage data.",
+            bounds = '',
+            display_name = "Numerics only")
 
         # GENTEMP
         AddOnCfg['gentemp'] = collections.OrderedDict()
@@ -1065,6 +1098,7 @@ def SaveAddOnSettings(query_string):
             "gensyslog" : ConfigFiles[GENLOADER_CONFIG],
             "gengpio" : ConfigFiles[GENLOADER_CONFIG],
             "gengpioin" : ConfigFiles[GENGPIOIN_CONFIG],
+            "gengpioledblink" : ConfigFiles[GENGPIOLEDBLINK_CONFIG],
             "genexercise" : ConfigFiles[GENEXERCISE_CONFIG],
             "genemail2sms" : ConfigFiles[GENEMAIL2SMS_CONFIG],
             "gentankutil" : ConfigFiles[GENTANKUTIL_CONFIG],
@@ -1277,21 +1311,29 @@ def ReadAdvancedSettingsFromFile():
         if ControllerType != 'h_100':
             ConfigSettings["usenominallinevolts"] = ['boolean', 'Use Nominal Volts Override', 18, False, "", 0, GENMON_CONFIG, GENMON_SECTION, "usenominallinevolts"]
             ConfigSettings["nominallinevolts"] = ['int', 'Override nominal line voltage in UI', 19, "240", "", 0, GENMON_CONFIG, GENMON_SECTION,"nominallinevolts"]
+            ControllerInfo = GetControllerInfo("controller").lower()
+            if "nexus" in ControllerInfo:
+                ConfigSettings["nexus_legacy_freq"] = ['boolean', 'Use Nexus Legacy Frequency', 20, True, "", 0, GENMON_CONFIG, GENMON_SECTION, "nexus_legacy_freq"]
         else:
             ConfigSettings["fuel_units"] = ['list', 'Fuel Units', 18, "gal", "", "gal,cubic feet", GENMON_CONFIG, GENMON_SECTION, "fuel_units"]
             ConfigSettings["half_rate"] = ['float', 'Fuel Rate Half Load', 19, "0.0", "", 0, GENMON_CONFIG, GENMON_SECTION, "half_rate"]
             ConfigSettings["full_rate"] = ['float', 'Fuel Rate Full Load', 20, "0.0", "", 0, GENMON_CONFIG, GENMON_SECTION, "full_rate"]
 
-        ConfigSettings["kwlogmax"] = ['string', 'Maximum size Power Log (MB)', 21, "", "", 0, GENMON_CONFIG, GENMON_SECTION, "kwlogmax"]
-        ConfigSettings["currentdivider"] = ['float', 'Current Divider', 22, "", "", 0, GENMON_CONFIG, GENMON_SECTION, "currentdivider"]
-        ConfigSettings["currentoffset"] = ['string', 'Current Offset', 23, "", "", 0, GENMON_CONFIG, GENMON_SECTION, "currentoffset"]
-        ConfigSettings["legacy_power"] = ['boolean', 'Use Legacy Power Calculation', 24, False, "", 0, GENMON_CONFIG, GENMON_SECTION, "legacy_power"]
+        ConfigSettings["enable_fuel_log"] = ['boolean', 'Log Fuel Level to File', 23, False, "", 0, GENMON_CONFIG, GENMON_SECTION, "enable_fuel_log"]
+        ConfigSettings["fuel_log_freq"] = ['float', 'Fuel Log Frequency', 24, "15.0", "", 0, GENMON_CONFIG, GENMON_SECTION, "fuel_log_freq"]
+        #ConfigSettings["fuel_log"] = ['string', 'Fuel Log Path and File Name', 25, "", "", 0, GENMON_CONFIG, GENMON_SECTION, "/etc/genmon/fuellog.txt"]
 
-        ConfigSettings["disableplatformstats"] = ['boolean', 'Disable Platform Stats', 25, False, "", 0, GENMON_CONFIG, GENMON_SECTION, "disableplatformstats"]
-        ConfigSettings["https_port"] = ['int', 'Override HTTPS port', 26, "", "", 0, GENMON_CONFIG, GENMON_SECTION, "https_port"]
-        ConfigSettings["user_url"] = ['string', 'User URL', 27, "", "", 0, GENMON_CONFIG, GENMON_SECTION, "user_url"]
-        ConfigSettings["extend_wait"] = ['int', 'Extend email retry', 28, "0", "", 0, MAIL_CONFIG, MAIL_SECTION,"extend_wait"]
-        ConfigSettings["min_outage_duration"] = ['int', 'Minimum Outage Duration', 29, "0", "", 0, GENMON_CONFIG, GENMON_SECTION,"min_outage_duration"]
+        ConfigSettings["kwlogmax"] = ['string', 'Maximum size Power Log (MB)', 31, "", "", 0, GENMON_CONFIG, GENMON_SECTION, "kwlogmax"]
+        ConfigSettings["currentdivider"] = ['float', 'Current Divider', 32, "", "", 0, GENMON_CONFIG, GENMON_SECTION, "currentdivider"]
+        ConfigSettings["currentoffset"] = ['string', 'Current Offset', 33, "", "", 0, GENMON_CONFIG, GENMON_SECTION, "currentoffset"]
+        ConfigSettings["legacy_power"] = ['boolean', 'Use Legacy Power Calculation', 34, False, "", 0, GENMON_CONFIG, GENMON_SECTION, "legacy_power"]
+
+        ConfigSettings["disableplatformstats"] = ['boolean', 'Disable Platform Stats', 35, False, "", 0, GENMON_CONFIG, GENMON_SECTION, "disableplatformstats"]
+        ConfigSettings["https_port"] = ['int', 'Override HTTPS port', 36, "", "", 0, GENMON_CONFIG, GENMON_SECTION, "https_port"]
+        ConfigSettings["user_url"] = ['string', 'User URL', 37, "", "", 0, GENMON_CONFIG, GENMON_SECTION, "user_url"]
+        ConfigSettings["extend_wait"] = ['int', 'Extend email retry', 38, "0", "", 0, MAIL_CONFIG, MAIL_SECTION,"extend_wait"]
+        ConfigSettings["min_outage_duration"] = ['int', 'Minimum Outage Duration', 39, "0", "", 0, GENMON_CONFIG, GENMON_SECTION,"min_outage_duration"]
+        ConfigSettings["multi_instance"] = ['boolean', 'Allow Multiple Genmon Instances', 40, False, "", 0, GENMON_CONFIG, GENMON_SECTION, "multi_instance"]
 
 
         for entry, List in ConfigSettings.items():
@@ -1653,6 +1695,11 @@ def Update():
         LogErrorLine("Error in Update: " + str(e1))
 
 #-------------------------------------------------------------------------------
+def GetLogs():
+    # update
+    if not RunBashScript("genmonmaint.sh -l " + loglocation):   # archive logs
+        LogError("Error in GetLogs")
+#-------------------------------------------------------------------------------
 def Backup():
     # update
     if not RunBashScript("genmonmaint.sh -b -c " + ConfigFilePath):   # backup
@@ -1933,7 +1980,11 @@ def GetErrorLine():
     return fname + ":" + str(lineno)
 
 #-------------------------------------------------------------------------------
-def Close(NoExit = False):
+def SignalClose(signum, frame):
+
+    Close()
+#-------------------------------------------------------------------------------
+def Close():
 
     global Closing
 
@@ -1945,40 +1996,15 @@ def Close(NoExit = False):
     except Exception as e1:
         LogErrorLine("Error in close: " + str(e1))
 
-    LogError("genserv closed.")
-    if not NoExit:
-        sys.exit(0)
+    sys.exit(0)
 
 #-------------------------------------------------------------------------------
 if __name__ == "__main__":
 
-    address=ProgramDefaults.LocalHost
+    console, ConfigFilePath, address, port, loglocation, log = MySupport.SetupAddOnProgram("genserv")
 
-    # log errors in this module to a file
-    console = SetupLogger("genserv_console", log_file = "", stream = True)
-
-    HelpStr = '\nsudo python genserv.py -a <IP Address or localhost> -c <path to genmon config file>\n'
-
-    try:
-        ConfigFilePath = ProgramDefaults.ConfPath
-        opts, args = getopt.getopt(sys.argv[1:],"hc:a:",["help","configpath=","address="])
-    except getopt.GetoptError:
-        console.error("Invalid command line argument.")
-        sys.exit(2)
-
-    for opt, arg in opts:
-        if opt == '-h':
-            console.error(HelpStr)
-            sys.exit()
-        elif opt in ("-a", "--address"):
-            address = arg
-        elif opt in ("-c", "--configpath"):
-            ConfigFilePath = arg
-            ConfigFilePath = ConfigFilePath.strip()
-    # NOTE: signal handler is not compatible with the exception handler around app.run()
-    #atexit.register(Close)
-    #signal.signal(signal.SIGTERM, Close)
-    #signal.signal(signal.SIGINT, Close)
+    signal.signal(signal.SIGTERM, SignalClose)
+    signal.signal(signal.SIGINT, SignalClose)
 
     MAIL_CONFIG = os.path.join(ConfigFilePath, "mymail.conf")
     GENMON_CONFIG = os.path.join(ConfigFilePath, "genmon.conf")
@@ -1989,6 +2015,7 @@ if __name__ == "__main__":
     GENMQTT_CONFIG = os.path.join(ConfigFilePath, "genmqtt.conf")
     GENSLACK_CONFIG = os.path.join(ConfigFilePath, "genslack.conf")
     GENGPIOIN_CONFIG = os.path.join(ConfigFilePath, "gengpioin.conf")
+    GENGPIOLEDBLINK_CONFIG = os.path.join(ConfigFilePath, "gengpioledblink.conf")
     GENEXERCISE_CONFIG = os.path.join(ConfigFilePath, "genexercise.conf")
     GENEMAIL2SMS_CONFIG = os.path.join(ConfigFilePath, "genemail2sms.conf")
     GENTANKUTIL_CONFIG = os.path.join(ConfigFilePath, "gentankutil.conf")
@@ -1997,15 +2024,11 @@ if __name__ == "__main__":
     GENSNMP_CONFIG = os.path.join(ConfigFilePath, "gensnmp.conf")
     GENTEMP_CONFIG = os.path.join(ConfigFilePath, "gentemp.conf")
 
-    if os.geteuid() != 0:
-        LogConsole("You need to have root privileges to run this script.\nPlease try again, this time using 'sudo'.")
-        sys.exit(1)
-
     ConfigFileList = [GENMON_CONFIG, MAIL_CONFIG, GENLOADER_CONFIG, GENSMS_CONFIG,
         MYMODEM_CONFIG, GENPUSHOVER_CONFIG, GENMQTT_CONFIG, GENSLACK_CONFIG,
-        GENGPIOIN_CONFIG, GENEXERCISE_CONFIG, GENEMAIL2SMS_CONFIG,
-        GENTANKUTIL_CONFIG, GENTANKDIY_CONFIG, GENALEXA_CONFIG, GENSNMP_CONFIG,
-        GENTEMP_CONFIG]
+        GENGPIOIN_CONFIG, GENGPIOLEDBLINK_CONFIG, GENEXERCISE_CONFIG,
+        GENEMAIL2SMS_CONFIG, GENTANKUTIL_CONFIG, GENTANKDIY_CONFIG,
+        GENALEXA_CONFIG, GENSNMP_CONFIG, GENTEMP_CONFIG]
 
     for ConfigFile in ConfigFileList:
         if not os.path.isfile(ConfigFile):
@@ -2019,11 +2042,6 @@ if __name__ == "__main__":
         else:
             configlog = log
         ConfigFiles[ConfigFile] = MyConfig(filename = ConfigFile, log = configlog)
-        if ConfigFile == GENMON_CONFIG:
-            if ConfigFiles[GENMON_CONFIG].HasOption('loglocation'):
-                loglocation = ConfigFiles[GENMON_CONFIG].ReadValue('loglocation')
-                # log errors in this module to a file
-                log = SetupLogger("genserv", os.path.join(loglocation, "genserv.log"))
 
     AppPath = sys.argv[0]
     if not LoadConfig():
@@ -2047,18 +2065,7 @@ if __name__ == "__main__":
         LogError("Required file missing : genmonmaint.sh")
         sys.exit(1)
 
-    startcount = 0
-    while startcount <= 4:
-        try:
-            MyClientInterface = ClientInterface(host = address, port = clientport, log = log)
-            break
-        except Exception as e1:
-            startcount += 1
-            if startcount >= 4:
-                LogConsole("Error: genmon not loaded.")
-                sys.exit(1)
-            time.sleep(1)
-            continue
+    MyClientInterface = ClientInterface(host = address, port = clientport, log = log)
 
     Start = datetime.datetime.now()
 
@@ -2077,16 +2084,13 @@ if __name__ == "__main__":
         sys.exit(1)
 
     CacheToolTips()
-    while True:
-        try:
-            app.run(host="0.0.0.0", port=HTTPPort, threaded = True, ssl_context=SSLContext, use_reloader = False, debug = False)
+    try:
+        app.run(host="0.0.0.0", port=HTTPPort, threaded = True, ssl_context=SSLContext, use_reloader = False, debug = False)
 
-        except Exception as e1:
-            LogErrorLine("Error in app.run: " + str(e1))
-            #Errno 98
-            if e1.errno != errno.EADDRINUSE: # and e1.errno != errno.EIO:
-                sys.exit(1)
-            time.sleep(2)
-            if Closing:
-                sys.exit(0)
-            Restart()
+    except Exception as e1:
+        LogErrorLine("Error in app.run: " + str(e1))
+        #Errno 98
+        if e1.errno != errno.EADDRINUSE: # and e1.errno != errno.EIO:
+            sys.exit(1)
+
+        sys.exit(0)

@@ -433,7 +433,9 @@ function json2html(json, indent, parentkey) {
           console.log("no property of key in json2html: " + key);
           return outstr
         }
-        if (json[key].constructor === Array) {
+        if (json[key] === null) {
+          outstr += indent + key + ' : ' + getItem(json[key], key); //parentkey);
+        } else if (json[key].constructor === Array) {
             if (json[key].length > 0) {
               outstr += "<br>" + indent + key + ' :<br>';   // + json2html(json[key], indent, key);
               for (var i = 0; i < json[key].length; ++i) {
@@ -1331,7 +1333,7 @@ function saveNotifications(){
              $('.progress-bar-fill').queue(function () {
                   $(this).css('width', '100%')
              });
-             setTimeout(function(){ vex.closeAll();}, 10000);
+             setTimeout(function(){ vex.closeAll();gotoLogin();}, 10000);
            }
         }
     })
@@ -1780,7 +1782,7 @@ function DisplaySettings(){
               outstr += '<tr><td width="25px">&nbsp;</td><td bgcolor="#ffcccc" width="300px">' + result[key][1] + '</td><td bgcolor="#ffcccc">' + printSettingsField(result[key][0], key, result[key][3], result[key][4], result[key][5]) + '</td></tr>';
             } else if (key == "weatherlocation") {
               outstr += '<tr><td width="25px">&nbsp;</td><td valign="top" width="300px">' + result[key][1] + '</td><td>' + printSettingsField(result[key][0], key, result[key][3], result[key][4], result[key][5]);
-              if (usehttps == true) {
+              if (httpsUsed() == true) {
                 outstr += '<br><button type="button" id="weathercityname" onclick="lookupLocation()">Look Up</button>';
               }
               outstr += '</td></tr>';
@@ -1921,7 +1923,7 @@ function toggleSectionInverse(animation, section) {
 //*****************************************************************************
 function lookupLocation() {
     if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(locationSuccess, locationError);
+        navigator.geolocation.getCurrentPosition(locationSuccess, locationError, {timeout:10000});
     } else {
         GenmonAlert("Your browser does not support Geolocation!");
     }
@@ -1947,6 +1949,11 @@ function locationError(error) {
 //*****************************************************************************
 function locationSuccess(position) {
     try {
+            if ($('#weatherkey').val().length < 1 ) {
+              GenmonAlert("API key is required for city lookup.");
+              return;
+            }
+
             var weatherAPI = '//api.openweathermap.org/data/2.5/forecast?lat=' + position.coords.latitude + '&lon=' + position.coords.longitude + '&lang=en&APPID='+$('#weatherkey').val();
             $.getJSON(weatherAPI, function (response) {
                 $('#weatherlocation').val(response.city.id);
@@ -2081,6 +2088,7 @@ function saveSettings(){
                 if ($('#fueltype').val() != $('#fueltype').attr('oldValue')) { myGenerator["fueltype"] = $('#fueltype').val(); }
                 if ($('#favicon').val() != $('#favicon').attr('oldValue')) { changeFavicon($('#favicon').val()); }
                 if (($('#enhancedexercise').prop('checked')  === true ? "true" : "false") != $('#enhancedexercise').attr('oldValue')) { myGenerator['EnhancedExerciseEnabled'] = ($('#enhancedexercise').prop('checked')  === true ? "true" : "false") }
+                gotoLogin();
              }, 10000);
            }
         }
@@ -2324,10 +2332,26 @@ function saveAddon(addon, addonTitle){
              });
              setTimeout(function(){
                 vex.closeAll();
+                gotoLogin();
              }, 10000);
+
            }
         }
     })
+}
+
+//*****************************************************************************
+function httpsUsed() {
+
+    var url = window.location.href;
+    return url.includes("https:")
+}
+
+//*****************************************************************************
+function gotoLogin() {
+
+    var url = window.location.href.split("/")[0].split("?")[0];
+    window.location.href = url.concat("/logout");
 }
 //*****************************************************************************
 function saveAddonJSON(addon) {

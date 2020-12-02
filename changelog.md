@@ -1,12 +1,33 @@
 # Change Log
 All notable changes to this project will be documented in this file.
 
+## V1.15.11 - 2020-11-15
+- A new library was added so the restart after the upgrade may take a few seconds longer than ususal
+- Improvements for start/stop of programs.
+- Added new check to disallow loading multiple instances of any genmon program unless multi_instance option is set to True. see https://github.com/jgyates/genmon/wiki/Appendix-J-Multiple-Instances-of-Genmon for additional details.
+- Update in javascript to handle userdefined JSON data with null entries
+- shutdown cleanup improved for genmqtt.py and gensnmp.py
+- removed restart code / while loop in genserv.py that is likley the cause of intermittant corruption of conf file
+- Added option to use alternate reading for frequency for Nexus Liquid Cooled units
+- Minor updates to help with debugging
+
+## V1.15.10 - 2020-11-09
+- Added new tank sensor type for gentankdiy.py add on (thanks @curtis1757)
+- Misc code optimizations for maintenance purposes
+- Fixed bug in shutdown code
+- Minor change improve error checking in genlaoder
+- Additional error checking for power log entries
+- Added new alarm message for Evolution 2
+
 ## V1.15.09 - 2020-11-05
 - Rounded value written to power log to 3 decimal places (Evolution)
 - Corrected issue with email errors relating to RFC2821 (see https://tools.ietf.org/html/rfc2821#section-3.3)
 - More improvements to better detect and recover modbus sync issues when using serial over TCP with weak wifi signals
 - Improvemnt in gensnmp.py to clean up on restarts (thanks @liltux)
 - Minor cleanup on genmqtt.py
+- Cleanup saving of settings web app redirect when using secure login (thanks @curtis1757)
+- Additional checks added for weather API city lookup
+- gensnmp.py updates to allow an option to not display units for numeric values in SNMP responses, bug fix
 
 ## V1.15.08 - 2020-10-27
 - Additional parameter validation for values read from conf file

@@ -732,7 +732,7 @@ class Evolution(GeneratorController):
         ReturnKW = "Unknown"
         ReturnModel = "Unknown"
 
-        SerialNumber = self.GetSerialNumber()
+        SerialNumber = self.GetSerialNumber(retry = True)
         Controller = self.GetController()
 
         if not len(SerialNumber) or not len(Controller):
@@ -2017,7 +2017,7 @@ class Evolution(GeneratorController):
         # Nexus and Evo Air Cooled: ramps up to 600 decimal on LP/NG   (3600 RPM)
         # this is possibly raw data from RPM sensor
         Sensors.append({"Raw RPM Sensor" : self.GetParameter("003c")})
-        Sensors.append({"Frequency (Calculated)" : self.GetFrequency(Calculate = True)})
+        Sensors.append({"Hz (Calculated)" : self.GetFrequency(Calculate = True)})
 
         if self.EvolutionController and self.LiquidCooled:
             # get total hours since activation
@@ -2358,7 +2358,8 @@ class Evolution(GeneratorController):
         0x3c : "Schedule B Serviced",
         0x3d : "Schedule A Serviced",
         0x3e : "Battery Maintained",
-        0x3f : "Maintenance Reset"
+        0x3f : "Maintenance Reset",
+        0x78 : "No Wi-Fi Module"             # Validated on Evolution 2 Air Cooled
         }
 
         NexusAlarmLogDecoder = {
@@ -2527,7 +2528,7 @@ class Evolution(GeneratorController):
         return "Error Code Unknown: %04d\n" % AlarmCode
 
     #------------ Evolution:GetSerialNumber ------------------------------------
-    def GetSerialNumber(self):
+    def GetSerialNumber(self, retry = False):
 
         # serial number format:
         # Hex Register Values:  30 30 30 37 37 32 32 39 38 37 -> High part of each byte = 3, low part is SN
@@ -2543,7 +2544,8 @@ class Evolution(GeneratorController):
         Value = self.GetRegisterValueFromList(RegStr)       # Serial Number Register
         if len(Value) != 20:
             # retry reading serial number
-            self.ModBus.ProcessTransaction("%04x" % SERIAL_NUM_REG, SERIAL_NUM_REG_LENGTH)
+            if retry:
+                self.ModBus.ProcessTransaction("%04x" % SERIAL_NUM_REG, SERIAL_NUM_REG_LENGTH)
             return ""
 
         # all nexus and evolution models should have all "f" for values.
@@ -3323,7 +3325,9 @@ class Evolution(GeneratorController):
                 elif not self.EvolutionController and self.LiquidCooled:
                     # Nexus Liquid Cooled
                     FloatTemp = self.GetParameter("0008", ReturnFloat = True, Divider = 1.0, Label = "Hz")
-                    FloatTemp = FloatTemp * 2.0
+                    # TODO this should be optiona
+                    if self.NexusLegacyFreq:
+                        FloatTemp = FloatTemp * 2.0
                     if ReturnFloat:
                         return FloatTemp
 
@@ -3851,8 +3855,8 @@ class Evolution(GeneratorController):
 
             Line.append({"Utility Voltage" : self.ValueOut(self.GetUtilityVoltage(ReturnInt = True), "V", JSONNum)})
             #
-            Line.append({"Utility Voltage Max" : self.ValueOut(self.UtilityVoltsMax, "V", JSONNum)})
-            Line.append({"Utility Voltage Min" : self.ValueOut(self.UtilityVoltsMin, "V", JSONNum)})
+            Line.append({"Utility Max Voltage" : self.ValueOut(self.UtilityVoltsMax, "V", JSONNum)})
+            Line.append({"Utility Min Voltage" : self.ValueOut(self.UtilityVoltsMin, "V", JSONNum)})
             Line.append({"Utility Threshold Voltage" : self.ValueOut(self.GetThresholdVoltage(ReturnInt = True), "V", JSONNum)})
 
             if self.EvolutionController and self.LiquidCooled:
@@ -3901,6 +3905,9 @@ class Evolution(GeneratorController):
 
         StartInfo = {}
         try:
+            EvoLC = self.EvolutionController and self.LiquidCooled
+            if EvoLC is None:
+                EvoLC = False
             StartInfo["fueltype"] = self.FuelType
             StartInfo["model"] = self.Model
             StartInfo["nominalKW"] = self.NominalKW
@@ -3915,12 +3922,12 @@ class Evolution(GeneratorController):
             StartInfo["FuelConsumption"] = self.FuelConsumptionSupported()
             StartInfo["UtilityVoltage"] = True
             StartInfo["RemoteCommands"] = not self.SmartSwitch  # Start and Stop
-            StartInfo["ResetAlarms"] = self.EvolutionController and self.LiquidCooled
+            StartInfo["ResetAlarms"] = EvoLC
             StartInfo["AckAlarms"] = False
             StartInfo["RemoteTransfer"] = not self.SmartSwitch      # Start / Transfer
             StartInfo["RemoteButtons"] = self.RemoteButtonsSupported()  # On, Off , Auto
             StartInfo["ExerciseControls"] = not self.SmartSwitch
-            StartInfo["WriteQuietMode"] = self.EvolutionController and self.LiquidCooled
+            StartInfo["WriteQuietMode"] = EvoLC
             StartInfo["Firmware"] = self.GetFirmwareVersion()
             StartInfo["Hardware"] = self.GetHardwareVersion()
 
@@ -3967,6 +3974,7 @@ class Evolution(GeneratorController):
                 self.UseFuelSensor = self.config.ReadValue('usesensorforfuelgauge', return_type = bool, default = True)
                 self.IgnoreUnknown = self.config.ReadValue('ignore_unknown', return_type = bool, default = False)
                 self.LegacyPower = self.config.ReadValue('legacy_power', return_type = bool, default = False)
+                self.NexusLegacyFreq = self.config.ReadValue('nexus_legacy_freq', return_type = bool, default = True)
 
                 self.SerialNumberReplacement = self.config.ReadValue('serialnumberifmissing', default = None)
                 if self.SerialNumberReplacement != None and len(self.SerialNumberReplacement):

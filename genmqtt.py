@@ -50,7 +50,8 @@ class MyGenPush(MySupport):
         flush_interval = float('inf'),
         use_numeric = False,
         debug = False,
-        loglocation = ProgramDefaults.LogPath):
+        loglocation = ProgramDefaults.LogPath,
+        console = None):
 
         super(MyGenPush, self).__init__()
         self.Callback = callback
@@ -70,7 +71,7 @@ class MyGenPush(MySupport):
             # log errors in this module to a file
             self.log = SetupLogger("client", os.path.join(loglocation, "mygenpush.log"))
 
-        self.console = SetupLogger("mygenpush_console", log_file = "", stream = True)
+        self.console = console
 
         self.AccessLock = threading.Lock()
         self.BlackList = blacklist
@@ -79,24 +80,12 @@ class MyGenPush(MySupport):
         self.LastChange = {}
 
         try:
-            startcount = 0
-            while startcount <= 10:
-                try:
-                    self.Generator = ClientInterface(host = host, port = port, log = log)
-                    break
-                except Exception as e1:
-                    startcount += 1
-                    if startcount >= 10:
-                        self.LogDebug("genmon not loaded.")
-                        self.LogError("Unable to connect to genmon.")
-                        sys.exit(1)
-                    time.sleep(1)
-                    continue
+            self.Generator = ClientInterface(host = host, port = port, log = log)
 
             self.GetGeneratorStartInfo()
             # start thread to accept incoming sockets for nagios heartbeat
-            self.Threads["PollingThread"] = MyThread(self.MainPollingThread, Name = "PollingThread", start = False)
-            self.Threads["PollingThread"].Start()
+            self.Threads["MainPollingThread"] = MyThread(self.MainPollingThread, Name = "MainPollingThread", start = False)
+            self.Threads["MainPollingThread"].Start()
 
         except Exception as e1:
             self.LogErrorLine("Error in mygenpush init: "  + str(e1))
@@ -209,14 +198,14 @@ class MyGenPush(MySupport):
                 except Exception as e1:
                     self.LogErrorLine("Unable to get status: " + str(e1))
 
-                if self.WaitForExit("PollingThread", float(self.PollTime)):
+                if self.WaitForExit("MainPollingThread", float(self.PollTime)):
                     return
             except Exception as e1:
                 self.LogErrorLine("Error in mynotify:MainPollingThread: " + str(e1))
-                if self.WaitForExit("PollingThread", float(self.PollTime)):
+                if self.WaitForExit("MainPollingThread", float(self.PollTime)):
                     return
 
-    #------------ MySupport::CheckDictForChanges -------------------------------
+    #------------ MyGenPush::CheckDictForChanges -------------------------------
     # This function is recursive, it will turn a nested dict into a flat dict keys
     # that have a directory structure with corrposonding values and determine if
     # anyting changed. If it has then call our callback function
@@ -289,7 +278,7 @@ class MyGenPush(MySupport):
     # ---------- MyGenPush::Close-----------------------------------------------
     def Close(self):
         self.Exiting = True
-        self.KillThread("PollingThread")
+        self.KillThread("MainPollingThread")
         self.Generator.Close()
 
 #------------ MyMQTT class -----------------------------------------------------
@@ -301,21 +290,13 @@ class MyMQTT(MyCommon):
         loglocation = ProgramDefaults.LogPath,
         host = ProgramDefaults.LocalHost,
         port = ProgramDefaults.ServerPort,
-        configfilepath = ProgramDefaults.ConfPath):
+        configfilepath = ProgramDefaults.ConfPath,
+        console = None):
 
         super(MyMQTT, self).__init__()
 
-        self.LogFileName = os.path.join(loglocation, "genmqtt.log")
-
-        if log != None:
-            self.log = log
-        else:
-            # log errors in this module to a file
-            self.log = SetupLogger("client", self.LogFileName)
-
-        # cleanup
-        # test
-        self.console = SetupLogger("mymqtt_console", log_file = "", stream = True)
+        self.log = log
+        self.console = console
 
         self.Exiting = False
         self.Username = None
@@ -400,7 +381,7 @@ class MyMQTT(MyCommon):
 
             self.MQTTclient.on_connect = self.on_connect
             self.MQTTclient.on_message = self.on_message
-
+            self.MQTTclient.on_disconnect = self.on_disconnect
 
             if len(self.CertificateAuthorityPath):
                 if os.path.isfile(self.CertificateAuthorityPath):
@@ -436,9 +417,8 @@ class MyMQTT(MyCommon):
                 flush_interval = self.FlushInterval, use_numeric = self.UseNumeric,
                 debug = self.debug, port = port, loglocation = loglocation)
 
-            atexit.register(self.Close)
-            signal.signal(signal.SIGTERM, self.Close)
-            signal.signal(signal.SIGINT, self.Close)
+            signal.signal(signal.SIGTERM, self.SignalClose)
+            signal.signal(signal.SIGINT, self.SignalClose)
 
             self.MQTTclient.loop_start()
         except Exception as e1:
@@ -470,6 +450,11 @@ class MyMQTT(MyCommon):
             self.MQTTclient.publish(FullPath, value)
         except Exception as e1:
             self.LogErrorLine("Error in MyMQTT:PublishCallback: " + str(e1))
+
+    #------------ MyMQTT::on_disconnect-----------------------------------------
+    def on_disconnect(client, userdata,rc=0):
+
+        self.LogError("DisConnected result code " + str(rc))
 
     #------------ MyMQTT::on_connect--------------------------------------------
     # The callback for when the client receives a CONNACK response from the server.
@@ -516,42 +501,25 @@ class MyMQTT(MyCommon):
         except Exception as e1:
             self.LogErrorLine("Error in MyMQTT:on_message: " + str(e1))
 
+    # ----------MyMQTT::SignalClose---------------------------------------------
+    def SignalClose(self, signum, frame):
+
+        self.Close()
+        sys.exit(1)
     # ---------- MyMQTT::Close--------------------------------------------------
     def Close(self):
         self.LogDebug("Exiting MyMQTT")
-        self.Push.Close()
+
+        self.MQTTclient.loop_stop()
         self.Exiting = True
+        self.Push.Close()
+
 #-------------------------------------------------------------------------------
 if __name__ == "__main__":
 
-    address=ProgramDefaults.LocalHost
+    console, ConfigFilePath, address, port, loglocation, log = MySupport.SetupAddOnProgram("genmqtt")
 
-    console = SetupLogger("genmqtt_console_", log_file = "", stream = True)
-    HelpStr = '\nsudo python genmqtt.py -a <IP Address or localhost> -c <path to genmon config file>\n'
-    if os.geteuid() != 0:
-        console.error("\nYou need to have root privileges to run this script.\nPlease try again, this time using 'sudo'. Exiting.\n")
-        sys.exit(2)
-
-    try:
-        ConfigFilePath = ProgramDefaults.ConfPath
-        opts, args = getopt.getopt(sys.argv[1:],"hc:a:",["help","configpath=","address="])
-    except getopt.GetoptError:
-        console.error("Invalid command line argument.")
-        sys.exit(2)
-
-    for opt, arg in opts:
-        if opt == '-h':
-            console.error(HelpStr)
-            sys.exit()
-        elif opt in ("-a", "--address"):
-            address = arg
-        elif opt in ("-c", "--configpath"):
-            ConfigFilePath = arg
-            ConfigFilePath = ConfigFilePath.strip()
-
-    port, loglocation = MySupport.GetGenmonInitInfo(ConfigFilePath, log = console)
-
-    InstanceMQTT = MyMQTT(host = address, port = port, loglocation = loglocation, configfilepath = ConfigFilePath)
+    InstanceMQTT = MyMQTT(host = address, port = port, loglocation = loglocation, configfilepath = ConfigFilePath, console = console)
 
     while not InstanceMQTT.Exiting:
         time.sleep(0.5)

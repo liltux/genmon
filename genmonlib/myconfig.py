@@ -100,6 +100,7 @@ class MyConfig (MyCommon):
             return default
 
     #---------------------MyConfig::WriteSection--------------------------------
+    # NOTE: This will remove comments from the config file
     def alt_WriteSection(self, SectionName):
 
         if self.Simulation:
@@ -112,6 +113,7 @@ class MyConfig (MyCommon):
             return True
         try:
             with self.CriticalLock:
+                # open in unbuffered mode
                 with open(self.FileName, "w") as ConfigFile:
                     if sys.version_info.major < 3:
                         self.config.add_section(SectionName)
@@ -136,6 +138,7 @@ class MyConfig (MyCommon):
             return True
         try:
             with self.CriticalLock:
+                # open in unbuffered mode
                 with open(self.FileName, "a") as ConfigFile:
                     ConfigFile.write("[" + SectionName + "]")
                     ConfigFile.flush()
@@ -148,6 +151,7 @@ class MyConfig (MyCommon):
             return False
 
     #---------------------MyConfig::WriteValue----------------------------------
+    # NOTE: This will remove comments from the config file
     def alt_WriteValue(self, Entry, Value, remove = False, section = None):
 
         if self.Simulation:
@@ -190,6 +194,7 @@ class MyConfig (MyCommon):
                 FileString = ConfigFile.read()
                 ConfigFile.close()
 
+                # open in unbuffered mode
                 ConfigFile = open(self.FileName,'w')
                 for line in FileString.splitlines():
                     if not line.isspace():                  # blank lines

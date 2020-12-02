@@ -34,7 +34,7 @@ except Exception as e1:
     print("Error: " + str(e1))
     sys.exit(2)
 
-GENMON_VERSION = "V1.15.09"
+GENMON_VERSION = "V1.15.11"
 
 #------------ Monitor class ----------------------------------------------------
 class Monitor(MySupport):
@@ -95,7 +95,7 @@ class Monitor(MySupport):
 
         self.console = SetupLogger("genmon_console", log_file = "", stream = True)
 
-        if os.geteuid() != 0:
+        if not MySupport.PermissionsOK():
             self.LogConsole("You need to have root privileges to run this script.\nPlease try again, this time using 'sudo'.")
             sys.exit(1)
 
@@ -117,11 +117,16 @@ class Monitor(MySupport):
 
         self.config.log = self.log
 
-        if self.IsLoaded():
+        if self.IsLoaded(): # this checks based on the port used for the API
             self.LogConsole("ERROR: genmon.py is already loaded.")
             self.LogError("ERROR: genmon.py is already loaded.")
             sys.exit(1)
 
+        # this check is based on the file name.
+        if MySupport.IsRunning(os.path.basename(__file__), multi_instance = self.multi_instance):
+            self.LogConsole("ERROR: genmon.py is already loaded.")
+            self.LogError("ERROR: genmon.py is already loaded (2).")
+            sys.exit(1)
 
         if self.NewInstall:
             self.LogError("New version detected: Old = %s, New = %s" % (self.Version, ProgramDefaults.GENMON_VERSION))
@@ -132,9 +137,8 @@ class Monitor(MySupport):
         #  datetime.datetime(1, 1, 1, 0, 0) to check immediately on load
         self.LastSofwareUpdateCheck = datetime.datetime.now()
 
-        atexit.register(self.Close)
-        signal.signal(signal.SIGTERM, self.Close)
-        signal.signal(signal.SIGINT, self.Close)
+        signal.signal(signal.SIGTERM, self.SignalClose)
+        signal.signal(signal.SIGINT, self.SignalClose)
 
         # start thread to accept incoming sockets for nagios heartbeat and command / status clients
         self.Threads["InterfaceServerThread"] = MyThread(self.InterfaceServerThread, Name = "InterfaceServerThread")
@@ -206,6 +210,8 @@ class Monitor(MySupport):
         try:
             if self.config.HasOption('sitename'):
                 self.SiteName = self.config.ReadValue('sitename')
+
+            self.multi_instance =  self.config.ReadValue('multi_instance', return_type = bool, default = False)
 
             if self.config.HasOption('incoming_mail_folder'):
                 self.IncomingEmailFolder = self.config.ReadValue('incoming_mail_folder')     # imap folder for incoming mail
@@ -417,7 +423,7 @@ class Monitor(MySupport):
                 "gensms_modem.log", "genmqtt.log", "genpushover.log", "gensyslog.log",
                 "genloader.log", "myserialtcp.log", "genlog.log", "genslack.log",
                 "genexercise.log","genemail2sms.log", "gentankutil.log", "genalexa.log",
-                "gensnmp.log","gentemp.log"]
+                "gensnmp.log","gentemp.log", "gentankdiy.log", "gengpioledblink.log"]
             for File in FilesToSend:
                 LogFile = self.LogLocation + File
                 if os.path.isfile(LogFile):
@@ -505,6 +511,7 @@ class Monitor(MySupport):
             ## These commands are used by the web / socket interface only
             "power_log_json"    : [self.Controller.GetPowerHistory, (command.lower(),), True],
             "power_log_clear"   : [self.Controller.ClearPowerLog, (), True],
+            "fuel_log_clear"    : [self.Controller.ClearFuelLog, (), True],
             "start_info_json"   : [self.GetStartInfo, (), True],
             "registers_json"    : [self.Controller.DisplayRegisters, (False, True), True],  # display registers
             "allregs_json"      : [self.Controller.DisplayRegisters, (True, True), True],   # display registers
@@ -718,9 +725,11 @@ class Monitor(MySupport):
                 MonitorData.append({"Weather" : WeatherData})
 
             UserData = self.GetUserDefinedData()
-            if not UserData == None and len(UserData):
-                MonitorData.append({"External Data" : UserData})
-
+            if UserData != None and len(UserData):
+                try:
+                    MonitorData.append({"External Data" : UserData})
+                except Exception as e1:
+                    self.LogErrorLine("Error in appending user data: " + str(e1))
             if not DictOut:
                 return self.printToString(self.ProcessDispatch(Monitor,""))
         except Exception as e1:
@@ -1071,6 +1080,12 @@ class Monitor(MySupport):
             self.ServerSocket.close()
             self.ServerSocket = None
         #
+
+    # ----------Monitor::SignalClose--------------------------------------------
+    def SignalClose(self, signum, frame):
+
+        self.Close()
+        sys.exit(1)
 
     #---------------------Monitor::Close----------------------------------------
     def Close(self):

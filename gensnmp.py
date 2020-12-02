@@ -96,30 +96,34 @@ class GenSNMP(MySupport):
         loglocation = ProgramDefaults.LogPath,
         ConfigFilePath = MyCommon.DefaultConfPath,
         host = ProgramDefaults.LocalHost,
-        port = ProgramDefaults.ServerPort):
+        port = ProgramDefaults.ServerPort,
+        console = None):
 
         super(GenSNMP, self).__init__()
 
-        self.LogFileName = loglocation + "gensnmp.log"
         self.AccessLock = threading.Lock()
-        # log errors in this module to a file
-        self.log = SetupLogger("gensnmp", self.LogFileName)
 
-        self.console = SetupLogger("gensnmp_console", log_file = "", stream = True)
+        self.log = log
+        self.console = console
+
         self.mibData = []
         self.LastValues = {}
         self.transportDispatcher = None
 
+        self.UseNumeric = False
         self.MonitorAddress = host
         self.debug = False
         self.PollTime = 1
-        self.BlackList = [] #["Monitor"]
-        configfile = ConfigFilePath + 'gensnmp.conf'
+        self.BlackList = ["Outage"] #["Monitor"]
+        configfile = os.path.join(ConfigFilePath , 'gensnmp.conf')
         try:
             if not os.path.isfile(configfile):
                 self.LogConsole("Missing config file : " + configfile)
                 self.LogError("Missing config file : " + configfile)
                 sys.exit(1)
+
+            self.genmon_config = MyConfig(filename = os.path.join(ConfigFilePath, 'genmon.conf'), section = 'GenMon', log = self.log)
+            self.ControllerSelected = self.genmon_config.ReadValue('controllertype', default = "generac_evo_nexus")
 
             self.config = MyConfig(filename = configfile, section = 'gensnmp', log = self.log)
 
@@ -140,23 +144,7 @@ class GenSNMP(MySupport):
 
         try:
 
-            try:
-                startcount = 0
-                while startcount <= 10:
-                    try:
-                        self.Generator = ClientInterface(host = self.MonitorAddress, port = port, log = self.log)
-                        break
-                    except Exception as e1:
-                        startcount += 1
-                        if startcount >= 10:
-                            self.LogConsole("genmon not loaded.")
-                            self.LogError("Unable to connect to genmon.")
-                            sys.exit(1)
-                        time.sleep(1)
-                        continue
-
-            except Exception as e1:
-                self.LogErrorLine("Error in GenSNMP init: "  + str(e1))
+            self.Generator = ClientInterface(host = self.MonitorAddress, port = port, log = self.log)
 
             self.GetGeneratorStartInfo()
 
@@ -164,9 +152,9 @@ class GenSNMP(MySupport):
             self.Threads["SNMPThread"] = MyThread(self.SNMPThread, Name = "SNMPThread", start = False)
             self.Threads["SNMPThread"].Start()
 
-            atexit.register(self.Close)
-            signal.signal(signal.SIGTERM, self.Close)
-            signal.signal(signal.SIGINT, self.Close)
+            signal.signal(signal.SIGTERM, self.SignalClose)
+            signal.signal(signal.SIGINT, self.SignalClose)
+
             self.SetupSNMP() # Must be last since we do not return from this call
 
         except Exception as e1:
@@ -176,9 +164,9 @@ class GenSNMP(MySupport):
     #----------  GenSNMP::ControllerIsEvolutionNexus --------------------------------
     def ControllerIsEvolutionNexus(self):
         try:
-            if not "evolution" in self.StartInfo["Controller"].lower() and not "nexus" in self.StartInfo["Controller"].lower():
-                return False
-            return True
+            if "evolution" in self.StartInfo["Controller"].lower() or "nexus" in self.StartInfo["Controller"].lower():
+                return True
+            return False
         except Exception as e1:
             self.LogErrorLine("Error in ControllerIsEvolutionNexus: " + str(e1))
             return False
@@ -186,9 +174,9 @@ class GenSNMP(MySupport):
     #----------  GenSNMP::ControllerIsGeneracH100 ------------------------------
     def ControllerIsGeneracH100(self):
         try:
-            if not "h-100" in self.StartInfo["Controller"].lower() and not "g-panel" in self.StartInfo["Controller"].lower():
-                return False
-            return True
+            if "h-100" in self.StartInfo["Controller"].lower() or "g-panel" in self.StartInfo["Controller"].lower():
+                return True
+            return False
         except Exception as e1:
             self.LogErrorLine("Error in ControllerIsGeneracH100: " + str(e1))
             return False
@@ -264,39 +252,40 @@ class GenSNMP(MySupport):
     def SetupSNMP(self):
 
         try:
-            if self.ControllerIsEvolutionNexus():
+            if self.ControllerIsEvolutionNexus() or self.ControllerSelected == "generac_evo_nexus":
                 CtlID = 0
-            elif self.ControllerIsGeneracH100():
+            elif self.ControllerIsGeneracH100() or self.ControllerSelected == "h_100":
                 CtlID = 1
             else:
                 self.LogError("Error: Invalid controller type")
+                self.LogError(str(self.ControllerSelected))
                 return
 
             self.mibData.append(MyOID((1,3,6,1,2,1,1,1),return_type = str, description = "SysDescr", default = "Genmon Generator Monitor",log = self.log))
             self.mibData.append(MyOID((1,3,6,1,2,1,1,3,0),return_type = type(TimeTicks), description = "Uptime",log = self.log))
 
-            if self.ControllerIsEvolutionNexus():
+            if self.ControllerIsEvolutionNexus() or self.ControllerSelected == "generac_evo_nexus":
                 self.LogDebug("Evo/Nexus")
                 # Status Engine
                 self.AddOID((CtlID,0,0,0),return_type = str, description = "SwitchState", default = "Unknown", keywords = ["Status/Engine","Switch State"])
                 self.AddOID((CtlID,0,0,1),return_type = str, description = "EngineState", default = "Unknown", keywords = ["Status/Engine","Engine State"])
                 self.AddOID((CtlID,0,0,2),return_type = str, description = "ActiveRelays", default = "", keywords = ["Status/Engine","Active Relays"])
                 self.AddOID((CtlID,0,0,3),return_type = str, description = "ActiveSensors", default = "", keywords = ["Status/Engine","Active Sensors"])
-                self.AddOID((CtlID,0,0,4),return_type = str, description = "BatteryVolts", default = "0.0 V", keywords = ["Status/Engine","Battery Voltage"])
-                self.AddOID((CtlID,0,0,5),return_type = str, description = "BatteryStatus", default = " ", keywords = ["Status/Engine","Battery Status"])
+                self.AddOID((CtlID,0,0,4),return_type = str, description = "BatteryVolts", default = "", keywords = ["Status/Engine","Battery Voltage"])
+                self.AddOID((CtlID,0,0,5),return_type = str, description = "BatteryStatus", default = "", keywords = ["Status/Engine","Battery Status"])
                 self.AddOID((CtlID,0,0,6),return_type = str, description = "RPM", default = "", keywords = ["Status/Engine","RPM"])
-                self.AddOID((CtlID,0,0,7),return_type = str, description = "Frequency", default = "0 Hz", keywords = ["Status/Engine","Frequency"])
-                self.AddOID((CtlID,0,0,8),return_type = str, description = "OutputVoltage", default = "0 V", keywords = ["Status/Engine","Output Voltage"])
-                self.AddOID((CtlID,0,0,9),return_type = str, description = "OutputCurrent", default = "0 A", keywords = ["Status/Engine","Output Current"])
-                self.AddOID((CtlID,0,0,10),return_type = str, description = "OutputPower", default = "0 kW", keywords = ["Status/Engine","Output Power"])
+                self.AddOID((CtlID,0,0,7),return_type = str, description = "Frequency", default = "", keywords = ["Status/Engine","Frequency"])
+                self.AddOID((CtlID,0,0,8),return_type = str, description = "OutputVoltage", default = "", keywords = ["Status/Engine","Output Voltage"])
+                self.AddOID((CtlID,0,0,9),return_type = str, description = "OutputCurrent", default = "", keywords = ["Status/Engine","Output Current"])
+                self.AddOID((CtlID,0,0,10),return_type = str, description = "OutputPower", default = "", keywords = ["Status/Engine","Output Power"])
                 self.AddOID((CtlID,0,0,11),return_type = str, description = "RotorPoles", default = "", keywords = ["Status/Engine","Rotor Poles"])
                 # Status Line
-                self.AddOID((CtlID,0,1,0),return_type = str, description = "UtilityVoltage", default = "0 V", keywords = ["Status/Line","Utility Voltage"])
-                self.AddOID((CtlID,0,1,1),return_type = str, description = "UtilityVoltageMax", default = "0 V", keywords = ["Status/Line","Utility Voltage Max"])
-                self.AddOID((CtlID,0,1,2),return_type = str, description = "UtilityVoltageMin", default = "0 V", keywords = ["Status/Line","Utility Voltage Min"])
-                self.AddOID((CtlID,0,1,3),return_type = str, description = "UtilityThresholdVoltage", default = "0 V", keywords = ["Status/Line","Utility Threshold Voltage"])
-                self.AddOID((CtlID,0,1,4),return_type = str, description = "UtilityPickupVoltage", default = "0 V", keywords = ["Status/Line","Utility Pickup Voltage"])
-                self.AddOID((CtlID,0,1,4),return_type = str, description = "SetOutputVoltage", default = "0 V", keywords = ["Status/Line","Set Output Voltage"])
+                self.AddOID((CtlID,0,1,0),return_type = str, description = "UtilityVoltage", default = "", keywords = ["Status/Line","Utility Voltage"])
+                self.AddOID((CtlID,0,1,1),return_type = str, description = "UtilityVoltageMax", default = "", keywords = ["Status/Line","Utility Max Voltage"])
+                self.AddOID((CtlID,0,1,2),return_type = str, description = "UtilityVoltageMin", default = "", keywords = ["Status/Line","Utility Min Voltage"])
+                self.AddOID((CtlID,0,1,3),return_type = str, description = "UtilityThresholdVoltage", default = "", keywords = ["Status/Line","Utility Threshold Voltage"])
+                self.AddOID((CtlID,0,1,4),return_type = str, description = "UtilityPickupVoltage", default = "", keywords = ["Status/Line","Utility Pickup Voltage"])
+                self.AddOID((CtlID,0,1,4),return_type = str, description = "SetOutputVoltage", default = "", keywords = ["Status/Line","Set Output Voltage"])
                 # Status Last Alarms
                 self.AddOID((CtlID,0,2,0),return_type = str, description = "LastAlarmLog", default = " ", keywords = ["Status","Last Log","Alarm Log"])
                 self.AddOID((CtlID,0,2,1),return_type = str, description = "LastServiceLog", default = " ", keywords = ["Status","Last Log","Service Log"])
@@ -354,7 +343,7 @@ class GenSNMP(MySupport):
                 self.AddOID((CtlID,1,3,8),return_type = str, description = "HardwareVersion", default = " ", keywords = ["Maintenance/Service","Hardware Version"])
                 self.AddOID((CtlID,1,3,9),return_type = str, description = "FirmwareVersion", default = " ", keywords = ["Maintenance/Service","Firmware Version"])
 
-            if self.ControllerIsGeneracH100():
+            elif self.ControllerIsGeneracH100() or self.ControllerSelected == "h_100":
                 self.LogDebug("H-100/GPanel")
                 # Engine
                 self.AddOID((CtlID,0,0,0),return_type = str, description = "SwitchState", default = " ", keywords = ["Status/Engine","Switch State"])
@@ -362,8 +351,8 @@ class GenSNMP(MySupport):
                 self.AddOID((CtlID,0,0,2),return_type = str, description = "GeneratorStatus", default = " ", keywords = ["Status/Engine","Generator Status"])
                 self.AddOID((CtlID,0,0,3),return_type = str, description = "OutputPower", default = " ", keywords = ["Status/Engine","Output Power"])
                 self.AddOID((CtlID,0,0,4),return_type = str, description = "OutputPowerFactor", default = " ", keywords = ["Status/Engine","Power Factor"])
-                self.AddOID((CtlID,0,0,5),return_type = str, description = "RPM", default = 0, keywords = ["Status/Engine","RPM"])
-                self.AddOID((CtlID,0,0,6),return_type = str, description = "Frequency", default = " ", keywords = ["Status/Engine","Frequency"])
+                self.AddOID((CtlID,0,0,5),return_type = str, description = "RPM", default = 0, keywords = ["Status/Engine/RPM"])
+                self.AddOID((CtlID,0,0,6),return_type = str, description = "Frequency", default = " ", keywords = ["Status/Engine/Frequency"])
                 self.AddOID((CtlID,0,0,7),return_type = str, description = "ThrottlePosition", default = " ", keywords = ["Status/Engine","Throttle Position"])
                 self.AddOID((CtlID,0,0,8),return_type = str, description = "CoolantTemp", default = " ", keywords = ["Status/Engine","Coolant Temp"])
                 self.AddOID((CtlID,0,0,9),return_type = str, description = "CoolantLevel", default = " ", keywords = ["Status/Engine","Coolant Level"])
@@ -470,10 +459,17 @@ class GenSNMP(MySupport):
     #----------  GenSNMP::SnmpClose --------------------------------------------
     def SnmpClose(self):
 
-        if self.transportDispatcher != None:
-            self.transportDispatcher.closeDispatcher()
-            self.LogDebug("Dispatcher Closed")
-            self.transportDispatcher = None
+        try:
+            if self.transportDispatcher != None:
+                self.transportDispatcher.jobFinished(1)
+                self.transportDispatcher.unregisterRecvCbFun(recvId=None)
+                self.transportDispatcher.unregisterTransport(udp.domainName)
+                self.transportDispatcher.unregisterTransport(udp6.domainName)
+                self.transportDispatcher.closeDispatcher()
+                self.LogDebug("Dispatcher Closed")
+                self.transportDispatcher = None
+        except Exception as e1:
+            self.LogErrorLine("Error in SnmpClose: " + str(e1))
 
     #----------  GenSNMP::SnmpCallbackFunction ---------------------------------
     def SnmpCallbackFunction(self, transportDispatcher, transportDomain, transportAddress, wholeMsg):
@@ -567,11 +563,14 @@ class GenSNMP(MySupport):
             try:
                 if not self.UseNumeric:
                     statusdata = self.SendCommand("generator: status_json")
+                    maintdata = self.SendCommand("generator: maint_json")
+                    outagedata = self.SendCommand("generator: outage_json")
+                    monitordata = self.SendCommand("generator: monitor_json")
                 else:
                     statusdata = self.SendCommand("generator: status_num_json")
-                outagedata = self.SendCommand("generator: outage_json")
-                monitordata = self.SendCommand("generator: monitor_json")
-                maintdata = self.SendCommand("generator: maint_json")
+                    outagedata = self.SendCommand("generator: outage_num_json")
+                    monitordata = self.SendCommand("generator: monitor_num_json")
+                    maintdata = self.SendCommand("generator: maint_num_json")
                 try:
                     GenmonDict = {}
                     TempDict = {}
@@ -596,7 +595,19 @@ class GenSNMP(MySupport):
                     self.SnmpClose()
                     return
 
-    #------------ GenSNMP::CheckDictForChanges -------------------------------
+    #------------ GenSNMP::DictIsNumeric ---------------------------------------
+    def DictIsNumeric(self, node):
+
+        try:
+            if not self.UseNumeric:
+                return False
+            if isinstance(node, dict) and "type" in node and "value" in node and "unit" in node:
+                return True
+            return False
+        except Exception as e1:
+            self.LogErrorLine("Error in DictIsNumeric: " + str(e1))
+            return False
+    #------------ GenSNMP::CheckDictForChanges ---------------------------------
     # This function is recursive, it will turn a nested dict into a flat dict keys
     # that have a directory structure with corrposonding values and determine if
     # anyting changed. If it has then call our callback function
@@ -609,8 +620,12 @@ class GenSNMP(MySupport):
         if isinstance(node, dict):
            for key, item in node.items():
                if isinstance(item, dict):
-                   CurrentPath = PathPrefix + "/" + str(key)
-                   self.CheckDictForChanges(item, CurrentPath)
+                   if not self.DictIsNumeric(item):
+                       CurrentPath = PathPrefix + "/" + str(key)
+                       self.CheckDictForChanges(item, CurrentPath)
+                   else:
+                       CurrentPath = PathPrefix + "/" + str(key)
+                       self.CheckForChanges(CurrentPath, str(item["value"]))
                elif isinstance(item, list):
                    CurrentPath = PathPrefix + "/" + str(key)
                    if self.ListIsStrings(item):
@@ -619,7 +634,11 @@ class GenSNMP(MySupport):
                    else:
                        for listitem in item:
                            if isinstance(listitem, dict):
-                               self.CheckDictForChanges(listitem, CurrentPath)
+                               if not self.DictIsNumeric(item):
+                                   self.CheckDictForChanges(listitem, CurrentPath)
+                               else:
+                                   CurrentPath = PathPrefix + "/" + str(key)
+                                   self.CheckForChanges(CurrentPath, str(item["value"]))
                            else:
                                self.LogError("Invalid type in CheckDictForChanges: %s %s (2)" % (key, str(type(listitem))))
                else:
@@ -665,42 +684,30 @@ class GenSNMP(MySupport):
         except Exception as e1:
              self.LogErrorLine("Error in mygenpush:CheckForChanges: " + str(e1))
 
+    # ----------GenSNMP::SignalClose--------------------------------------------
+    def SignalClose(self, signum, frame):
+
+        try:
+            self.Close()
+        except Exception as e1:
+            self.LogErrorLine("Error in SignalClose: " + str(e1))
+        sys.exit(1)
+
     # ----------GenSNMP::Close----------------------------------------------
     def Close(self):
-        self.LogError("GenSNMP Exit")
-        self.KillThread("SNMPThread")
-        self.SnmpClose()
-        self.Generator.Close()
+
+        try:
+            self.LogDebug("GenSNMP Exit")
+            self.KillThread("SNMPThread")
+            self.SnmpClose()
+            self.Generator.Close()
+        except Exception as e1:
+            self.LogErrorLine("Error in Close: " + str(e1))
 #-------------------------------------------------------------------------------
 if __name__ == "__main__":
 
-    console = SetupLogger("GenSNMP_console", log_file = "", stream = True)
-    HelpStr = '\nsudo python gensnmp.py -a <IP Address or localhost> -c <path to genmon config file>\n'
-    if os.geteuid() != 0:
-        console.error("\nYou need to have root privileges to run this script.\nPlease try again, this time using 'sudo'. Exiting.\n")
-        sys.exit(2)
+    console, ConfigFilePath, address, port, loglocation, log = MySupport.SetupAddOnProgram("gensnmp")
 
-    try:
-        ConfigFilePath = ProgramDefaults.ConfPath
-        address = ProgramDefaults.LocalHost
-        opts, args = getopt.getopt(sys.argv[1:],"hc:a:",["help","configpath=","address="])
-    except getopt.GetoptError:
-        console.error("Invalid command line argument.")
-        sys.exit(2)
-
-    for opt, arg in opts:
-        if opt == '-h':
-            console.error(HelpStr)
-            sys.exit()
-        elif opt in ("-a", "--address"):
-            address = arg
-        elif opt in ("-c", "--configpath"):
-            ConfigFilePath = arg
-            ConfigFilePath = ConfigFilePath.strip()
-
-    port, loglocation = MySupport.GetGenmonInitInfo(ConfigFilePath, log = console)
-    log = SetupLogger("client", os.path.join(loglocation, "gensnmp.log"))
-
-    GenSNMPInstance = GenSNMP(log = log, loglocation = loglocation, ConfigFilePath = ConfigFilePath, host = address, port = port)
+    GenSNMPInstance = GenSNMP(log = log, loglocation = loglocation, ConfigFilePath = ConfigFilePath, host = address, port = port, console = console)
 
     sys.exit(1)
